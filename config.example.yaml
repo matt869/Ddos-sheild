@@ -1,0 +1,14 @@
+# DDoS Shield example configuration.
+# Copy to config.yaml and adjust to your traffic patterns.
+
+rate_limiter:
+  max_requests: 60      # max requests allowed per client...
+  window_seconds: 60    # ...within this rolling window
+
+blocklist:
+  ban_seconds: 300      # how long a tripped client stays banned
+  use_iptables: false   # true = also drop the IP at the firewall (Linux, root)
+
+monitor:
+  spike_threshold: 500  # requests/sec across all clients that counts as a spike
+  sample_seconds: 5     # window used to compute the current rate

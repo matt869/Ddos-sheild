@@ -1,0 +1,4 @@
+# Core library uses only the Python standard library.
+# These are only needed to run the Flask example in examples/flask_app.py.
+Flask>=3.0
+PyYAML>=6.0
