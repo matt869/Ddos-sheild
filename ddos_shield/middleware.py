@@ -7,12 +7,14 @@ Usage:
     app = Flask(__name__)
     protect(app, max_requests=60, window_seconds=60, ban_seconds=300)
 
-Clients over the limit get a 429 with a ``Retry-After`` header. Repeat
-offenders that keep hammering after being limited are added to the blocklist.
+Clients over the limit get a 429 and are added to the blocklist; while banned
+they get a 403. Both responses carry a ``Retry-After`` header telling the client
+how long the ban lasts.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .blocklist import BlockList
@@ -47,6 +49,7 @@ def protect(
     limiter = RateLimiter(max_requests=max_requests, window_seconds=window_seconds)
     blocklist = BlockList(ban_seconds=ban_seconds, use_iptables=use_iptables)
     monitor = TrafficMonitor(spike_threshold=spike_threshold)
+    retry_after = str(math.ceil(ban_seconds))
 
     # Expose components for tests / advanced tuning.
     app.extensions = getattr(app, "extensions", {})
@@ -69,14 +72,15 @@ def protect(
         if blocklist.is_banned(ip):
             resp = jsonify(error="forbidden", reason="temporarily blocked")
             resp.status_code = 403
+            resp.headers["Retry-After"] = retry_after
             return resp
 
         if not limiter.allow(ip):
-            # Persistent flooding after being limited -> ban.
+            # Over the limit -> ban, so further requests are rejected cheaply.
             blocklist.ban(ip)
             resp = jsonify(error="too_many_requests")
             resp.status_code = 429
-            resp.headers["Retry-After"] = str(int(window_seconds))
+            resp.headers["Retry-After"] = retry_after
             return resp
 
         return None  # allow the request through
