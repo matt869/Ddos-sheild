@@ -26,8 +26,8 @@ sudden traffic spikes, and (optionally) auto-blocking offenders at the firewall.
 ## Install
 
 ```bash
-git clone https://github.com/<your-username>/ddos-shield.git
-cd ddos-shield
+git clone https://github.com/matt869/Ddos-sheild.git
+cd Ddos-sheild
 pip install -r requirements.txt   # only needed for the Flask example
 ```
 
