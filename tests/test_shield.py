@@ -22,6 +22,17 @@ class RateLimiterTests(unittest.TestCase):
         self.assertFalse(rl.allow("ip", now=2))       # over limit
         self.assertTrue(rl.allow("ip", now=11))        # first hit aged out
 
+    def test_remaining_does_not_track_unseen_keys(self):
+        rl = RateLimiter(max_requests=5, window_seconds=10)
+        self.assertEqual(rl.remaining("never-seen", now=0), 5)
+        self.assertEqual(rl.prune(now=0), 0)  # nothing was stored
+
+    def test_remaining_counts_down(self):
+        rl = RateLimiter(max_requests=3, window_seconds=10)
+        rl.allow("ip", now=0)
+        self.assertEqual(rl.remaining("ip", now=1), 2)
+        self.assertEqual(rl.remaining("ip", now=20), 3)  # window expired
+
     def test_prune_removes_stale_clients(self):
         rl = RateLimiter(max_requests=5, window_seconds=10)
         rl.allow("gone", now=0)

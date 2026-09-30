@@ -57,7 +57,10 @@ class RateLimiter:
         now = time.monotonic() if now is None else now
         cutoff = now - self.window_seconds
         with self._lock:
-            hits = self._hits[key]
+            # Use .get() so querying an unseen key doesn't create an entry.
+            hits = self._hits.get(key)
+            if not hits:
+                return self.max_requests
             while hits and hits[0] <= cutoff:
                 hits.popleft()
             return max(0, self.max_requests - len(hits))
