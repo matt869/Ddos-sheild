@@ -7,3 +7,6 @@ env/
 config.yaml
 *.log
 .DS_Store
+.pytest_cache/
+.coverage
+htmlcov/
