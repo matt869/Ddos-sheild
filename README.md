@@ -115,6 +115,17 @@ traffic. Start conservative and watch your logs before tightening.
 
 ---
 
+## Running tests
+
+```bash
+python -m unittest -v
+```
+
+The Flask middleware tests are skipped unless Flask is installed
+(`pip install -r requirements.txt`).
+
+---
+
 ## Good defensive practice
 
 DDoS Shield is one layer. For real resilience, combine it with:
