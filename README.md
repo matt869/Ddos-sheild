@@ -1,5 +1,7 @@
 # DDoS Shield 🛡️
 
+[![tests](https://github.com/matt869/Ddos-sheild/actions/workflows/tests.yml/badge.svg)](https://github.com/matt869/Ddos-sheild/actions/workflows/tests.yml)
+
 A lightweight, dependency-light **DDoS protection toolkit** for Python web
 services. DDoS Shield helps you detect and absorb abusive traffic — floods,
 scrapers, brute-force loops — by rate-limiting requests per client, spotting
@@ -28,7 +30,7 @@ sudden traffic spikes, and (optionally) auto-blocking offenders at the firewall.
 ```bash
 git clone https://github.com/matt869/Ddos-sheild.git
 cd Ddos-sheild
-pip install -r requirements.txt   # only needed for the Flask example
+pip install .            # or: pip install ".[flask]" to include Flask
 ```
 
 ---
