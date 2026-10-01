@@ -50,6 +50,15 @@ class ProtectTests(unittest.TestCase):
         self.assertEqual(client.get("/").headers["Retry-After"], "31")
         self.assertEqual(client.get("/").headers["Retry-After"], "31")
 
+    def test_banned_retry_after_counts_down(self):
+        client = self.make_client(max_requests=1, window_seconds=10, ban_seconds=30)
+        client.get("/")
+        client.get("/")  # trips the limit -> banned
+        blocklist = client.application.extensions["ddos_shield"]["blocklist"]
+        ip = next(iter(blocklist._banned))
+        blocklist._banned[ip] -= 20  # pretend 20s have passed
+        self.assertEqual(client.get("/").headers["Retry-After"], "10")
+
 
 if __name__ == "__main__":
     unittest.main()

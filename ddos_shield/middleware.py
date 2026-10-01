@@ -9,7 +9,7 @@ Usage:
 
 Clients over the limit get a 429 and are added to the blocklist; while banned
 they get a 403. Both responses carry a ``Retry-After`` header telling the client
-how long the ban lasts.
+how long until the ban lifts.
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ def protect(
         if blocklist.is_banned(ip):
             resp = jsonify(error="forbidden", reason="temporarily blocked")
             resp.status_code = 403
-            resp.headers["Retry-After"] = retry_after
+            resp.headers["Retry-After"] = str(math.ceil(blocklist.time_remaining(ip)))
             return resp
 
         if not limiter.allow(ip):
