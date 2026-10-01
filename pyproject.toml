@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ddos-shield"
+dynamic = ["version"]
+description = "A lightweight DDoS protection toolkit for Python web services."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "matt869" }]
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+flask = ["Flask>=3.0"]
+
+[project.urls]
+Homepage = "https://github.com/matt869/Ddos-sheild"
+
+[tool.setuptools]
+packages = ["ddos_shield"]
+
+[tool.setuptools.dynamic]
+version = { attr = "ddos_shield.__version__" }
