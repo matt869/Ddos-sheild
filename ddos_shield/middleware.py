@@ -41,6 +41,7 @@ def protect(
     ban_seconds: float = 300.0,
     use_iptables: bool = False,
     spike_threshold: float = 500.0,
+    sample_seconds: float = 5.0,
     trust_forwarded_for: bool = False,
 ) -> None:
     """Attach DDoS Shield protection to a Flask ``app``."""
@@ -48,7 +49,9 @@ def protect(
 
     limiter = RateLimiter(max_requests=max_requests, window_seconds=window_seconds)
     blocklist = BlockList(ban_seconds=ban_seconds, use_iptables=use_iptables)
-    monitor = TrafficMonitor(spike_threshold=spike_threshold)
+    monitor = TrafficMonitor(
+        spike_threshold=spike_threshold, sample_seconds=sample_seconds
+    )
     retry_after = str(math.ceil(ban_seconds))
 
     # Expose components for tests / advanced tuning.

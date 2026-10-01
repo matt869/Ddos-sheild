@@ -59,6 +59,12 @@ class ProtectTests(unittest.TestCase):
         blocklist._banned[ip] -= 20  # pretend 20s have passed
         self.assertEqual(client.get("/").headers["Retry-After"], "10")
 
+    def test_monitor_settings_passed_through(self):
+        client = self.make_client(spike_threshold=50, sample_seconds=2)
+        monitor = client.application.extensions["ddos_shield"]["monitor"]
+        self.assertEqual(monitor.spike_threshold, 50)
+        self.assertEqual(monitor.sample_seconds, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
