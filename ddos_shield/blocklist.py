@@ -55,6 +55,15 @@ class BlockList:
             self._iptables("-D", ip)
         return False
 
+    def time_remaining(self, ip: str, now: float | None = None) -> float:
+        """Seconds left on ``ip``'s ban, or 0.0 if it isn't banned."""
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            expiry = self._banned.get(ip)
+        if expiry is None:
+            return 0.0
+        return max(0.0, expiry - now)
+
     def unban(self, ip: str) -> None:
         with self._lock:
             removed = self._banned.pop(ip, None) is not None
