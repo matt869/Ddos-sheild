@@ -14,4 +14,4 @@ from .blocklist import BlockList
 from .shield import Decision, Shield
 
 __all__ = ["RateLimiter", "TrafficMonitor", "BlockList", "Shield", "Decision"]
-__version__ = "1.1.0"
+__version__ = "1.2.0"
