@@ -1,5 +1,6 @@
 # DDoS Shield example configuration.
-# Copy to config.yaml and adjust to your traffic patterns.
+# Copy to config.yaml and adjust to your traffic patterns, then:
+#   protect(app, **load_config("config.yaml"))
 
 rate_limiter:
   max_requests: 60      # max requests allowed per client...
@@ -12,3 +13,12 @@ blocklist:
 monitor:
   spike_threshold: 500  # requests/sec across all clients that counts as a spike
   sample_seconds: 5     # window used to compute the current rate
+  alert_cooldown: 60    # min seconds between on_attack alerts
+
+maintenance:
+  cleanup_interval: 60  # how often stale per-client state is dropped
+
+# Never rate-limited: health checks, internal networks, your load balancer.
+allowlist:
+  - 127.0.0.1
+  - 10.0.0.0/8
