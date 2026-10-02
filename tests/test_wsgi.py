@@ -1,0 +1,69 @@
+"""Tests for the plain WSGI middleware (standard library only)."""
+
+import json
+import unittest
+from wsgiref.util import setup_testing_defaults
+
+from ddos_shield import Shield
+from ddos_shield.wsgi import ShieldMiddleware
+
+
+def hello_app(environ, start_response):
+    start_response("200 OK", [("Content-Type", "text/plain")])
+    return [b"hello"]
+
+
+def call(app, ip="203.0.113.7", forwarded=None):
+    environ = {"REMOTE_ADDR": ip}
+    if forwarded:
+        environ["HTTP_X_FORWARDED_FOR"] = forwarded
+    setup_testing_defaults(environ)
+    captured = {}
+
+    def start_response(status, headers):
+        captured["status"] = status
+        captured["headers"] = dict(headers)
+
+    body = b"".join(app(environ, start_response))
+    return captured["status"], captured["headers"], body
+
+
+class ShieldMiddlewareTests(unittest.TestCase):
+    def test_passes_through_then_limits(self):
+        app = ShieldMiddleware(hello_app, max_requests=2, window_seconds=10, ban_seconds=30)
+        self.assertEqual(call(app)[2], b"hello")
+        self.assertEqual(call(app)[2], b"hello")
+
+        status, headers, body = call(app)
+        self.assertEqual(status, "429 Too Many Requests")
+        self.assertEqual(headers["Retry-After"], "30")
+        self.assertEqual(json.loads(body), {"error": "too_many_requests"})
+
+        status, headers, body = call(app)
+        self.assertEqual(status, "403 Forbidden")
+        self.assertEqual(json.loads(body)["reason"], "temporarily blocked")
+        self.assertEqual(headers["Content-Length"], str(len(body)))
+
+    def test_forwarded_for_ignored_unless_trusted(self):
+        app = ShieldMiddleware(hello_app, max_requests=1, window_seconds=10)
+        call(app, forwarded="198.51.100.1")
+        # Different spoofed header, same socket address -> still limited.
+        self.assertTrue(call(app, forwarded="198.51.100.2")[0].startswith("429"))
+
+    def test_forwarded_for_when_trusted(self):
+        app = ShieldMiddleware(hello_app, trust_forwarded_for=True,
+                               max_requests=1, window_seconds=10)
+        call(app, ip="10.0.0.1", forwarded="198.51.100.1")
+        # Same proxy address, different real client -> allowed.
+        self.assertEqual(call(app, ip="10.0.0.1", forwarded="198.51.100.2")[0], "200 OK")
+
+    def test_accepts_existing_shield(self):
+        shield = Shield(max_requests=1)
+        app = ShieldMiddleware(hello_app, shield=shield)
+        self.assertIs(app.shield, shield)
+        with self.assertRaises(TypeError):
+            ShieldMiddleware(hello_app, shield=shield, max_requests=5)
+
+
+if __name__ == "__main__":
+    unittest.main()
