@@ -52,5 +52,24 @@ class AllowlistTests(unittest.TestCase):
             Shield(allowlist=["not-an-ip"])
 
 
+class CleanupTests(unittest.TestCase):
+    def test_stale_clients_are_dropped(self):
+        shield = Shield(max_requests=5, window_seconds=10, cleanup_interval=60)
+        shield.check("first", now=0)
+        for i in range(1000):
+            shield.check(f"10.0.{i // 256}.{i % 256}", now=1)
+        self.assertEqual(len(shield.limiter._hits), 1001)
+        shield.check("later", now=100)  # cleanup runs
+        self.assertEqual(set(shield.limiter._hits), {"later"})
+
+    def test_expired_bans_are_swept(self):
+        shield = Shield(max_requests=1, ban_seconds=5, cleanup_interval=60)
+        shield.check("ip", now=0)
+        shield.check("ip", now=0)  # banned
+        self.assertEqual(len(shield.blocklist._banned), 1)
+        shield.check("other", now=100)
+        self.assertEqual(len(shield.blocklist._banned), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

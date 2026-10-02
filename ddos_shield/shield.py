@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ipaddress
 import math
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Iterable
@@ -58,10 +59,17 @@ class Shield:
         spike_threshold: float = 500.0,
         sample_seconds: float = 5.0,
         allowlist: Iterable[str] = (),
+        cleanup_interval: float = 60.0,
     ) -> None:
         """``allowlist`` takes IPs or CIDR ranges (e.g. ``"10.0.0.0/8"``) that are
         never limited — health checks, internal networks, your load balancer.
+
+        Every ``cleanup_interval`` seconds, state for clients that have gone
+        quiet and expired bans is dropped, so memory stays bounded however
+        many distinct IPs the service sees.
         """
+        if cleanup_interval <= 0:
+            raise ValueError("cleanup_interval must be positive")
         self.limiter = RateLimiter(max_requests=max_requests, window_seconds=window_seconds)
         self.blocklist = BlockList(ban_seconds=ban_seconds, use_iptables=use_iptables)
         self.monitor = TrafficMonitor(
@@ -71,6 +79,9 @@ class Shield:
         self.allowlist = tuple(
             ipaddress.ip_network(entry, strict=False) for entry in allowlist
         )
+        self.cleanup_interval = float(cleanup_interval)
+        self._next_cleanup: float | None = None
+        self._lock = threading.Lock()
 
     def is_allowlisted(self, ip: str) -> bool:
         if not self.allowlist:
@@ -85,6 +96,7 @@ class Shield:
         """Record a request from ``ip`` and decide whether to serve it."""
         now = time.monotonic() if now is None else now
         self.monitor.record(now)
+        self._maybe_cleanup(now)
 
         if self.is_allowlisted(ip):
             return ALLOW
@@ -110,3 +122,14 @@ class Shield:
             )
 
         return ALLOW
+
+    def _maybe_cleanup(self, now: float) -> None:
+        with self._lock:
+            if self._next_cleanup is None:
+                self._next_cleanup = now + self.cleanup_interval
+                return
+            if now < self._next_cleanup:
+                return
+            self._next_cleanup = now + self.cleanup_interval
+        self.limiter.prune(now)
+        self.blocklist.sweep(now)
