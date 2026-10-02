@@ -14,24 +14,11 @@ how long until the ban lifts.
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
-from .blocklist import BlockList
-from .monitor import TrafficMonitor
-from .rate_limiter import RateLimiter
+from .shield import Shield, client_ip
 
-
-def client_ip(headers: Any, remote_addr: str) -> str:
-    """Best-effort real client IP.
-
-    Honors the first hop in X-Forwarded-For *only* — trust this only if your
-    app sits behind a proxy you control, otherwise the header is spoofable.
-    """
-    forwarded = headers.get("X-Forwarded-For", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return remote_addr or "unknown"
+__all__ = ["protect", "client_ip"]
 
 
 def protect(
@@ -43,23 +30,26 @@ def protect(
     spike_threshold: float = 500.0,
     sample_seconds: float = 5.0,
     trust_forwarded_for: bool = False,
-) -> None:
-    """Attach DDoS Shield protection to a Flask ``app``."""
+) -> Shield:
+    """Attach DDoS Shield protection to a Flask ``app``. Returns the ``Shield``."""
     from flask import request, jsonify  # imported lazily so Flask stays optional
 
-    limiter = RateLimiter(max_requests=max_requests, window_seconds=window_seconds)
-    blocklist = BlockList(ban_seconds=ban_seconds, use_iptables=use_iptables)
-    monitor = TrafficMonitor(
-        spike_threshold=spike_threshold, sample_seconds=sample_seconds
+    shield = Shield(
+        max_requests=max_requests,
+        window_seconds=window_seconds,
+        ban_seconds=ban_seconds,
+        use_iptables=use_iptables,
+        spike_threshold=spike_threshold,
+        sample_seconds=sample_seconds,
     )
-    retry_after = str(math.ceil(ban_seconds))
 
     # Expose components for tests / advanced tuning.
     app.extensions = getattr(app, "extensions", {})
     app.extensions["ddos_shield"] = {
-        "limiter": limiter,
-        "blocklist": blocklist,
-        "monitor": monitor,
+        "shield": shield,
+        "limiter": shield.limiter,
+        "blocklist": shield.blocklist,
+        "monitor": shield.monitor,
     }
 
     @app.before_request
@@ -70,20 +60,16 @@ def protect(
             else (request.remote_addr or "unknown")
         )
 
-        monitor.record()
+        decision = shield.check(ip)
+        if decision.allowed:
+            return None  # let the request through
 
-        if blocklist.is_banned(ip):
-            resp = jsonify(error="forbidden", reason="temporarily blocked")
-            resp.status_code = 403
-            resp.headers["Retry-After"] = str(math.ceil(blocklist.time_remaining(ip)))
-            return resp
+        body = {"error": decision.error}
+        if decision.status == 403:
+            body["reason"] = decision.reason
+        resp = jsonify(body)
+        resp.status_code = decision.status
+        resp.headers["Retry-After"] = str(decision.retry_after)
+        return resp
 
-        if not limiter.allow(ip):
-            # Over the limit -> ban, so further requests are rejected cheaply.
-            blocklist.ban(ip)
-            resp = jsonify(error="too_many_requests")
-            resp.status_code = 429
-            resp.headers["Retry-After"] = retry_after
-            return resp
-
-        return None  # allow the request through
+    return shield
