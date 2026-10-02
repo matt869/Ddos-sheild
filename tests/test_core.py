@@ -71,5 +71,29 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(len(shield.blocklist._banned), 0)
 
 
+class AttackAlertTests(unittest.TestCase):
+    def test_fires_once_per_cooldown(self):
+        alerts = []
+        shield = Shield(max_requests=10_000, spike_threshold=10, sample_seconds=1,
+                        on_attack=alerts.append, alert_cooldown=30)
+        for _ in range(9):
+            shield.check("ip", now=0)
+        self.assertEqual(alerts, [])
+        for _ in range(50):
+            shield.check("ip", now=0)
+        self.assertEqual(alerts, [10.0])          # once, despite 50 more hits
+        for _ in range(20):
+            shield.check("ip", now=31)
+        self.assertEqual(len(alerts), 2)          # cooldown passed, spike persists
+
+    def test_broken_callback_does_not_break_requests(self):
+        def boom(rate):
+            raise RuntimeError("pager down")
+
+        shield = Shield(spike_threshold=1, sample_seconds=1, on_attack=boom)
+        with self.assertLogs("ddos_shield", level="ERROR"):
+            self.assertTrue(shield.check("ip", now=0).allowed)
+
+
 if __name__ == "__main__":
     unittest.main()

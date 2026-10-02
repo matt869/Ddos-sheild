@@ -12,15 +12,18 @@ one question per request: let it through, or reject it (and how)?
 from __future__ import annotations
 
 import ipaddress
+import logging
 import math
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, Optional
 
 from .blocklist import BlockList
 from .monitor import TrafficMonitor
 from .rate_limiter import RateLimiter
+
+logger = logging.getLogger("ddos_shield")
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,8 @@ class Shield:
         sample_seconds: float = 5.0,
         allowlist: Iterable[str] = (),
         cleanup_interval: float = 60.0,
+        on_attack: Optional[Callable[[float], None]] = None,
+        alert_cooldown: float = 60.0,
     ) -> None:
         """``allowlist`` takes IPs or CIDR ranges (e.g. ``"10.0.0.0/8"``) that are
         never limited — health checks, internal networks, your load balancer.
@@ -67,6 +72,10 @@ class Shield:
         Every ``cleanup_interval`` seconds, state for clients that have gone
         quiet and expired bans is dropped, so memory stays bounded however
         many distinct IPs the service sees.
+
+        ``on_attack(rate)`` is called when the global request rate crosses
+        ``spike_threshold`` — page someone, tighten limits, scale up. It fires at
+        most once per ``alert_cooldown`` seconds while the spike lasts.
         """
         if cleanup_interval <= 0:
             raise ValueError("cleanup_interval must be positive")
@@ -81,6 +90,9 @@ class Shield:
         )
         self.cleanup_interval = float(cleanup_interval)
         self._next_cleanup: float | None = None
+        self.on_attack = on_attack
+        self.alert_cooldown = float(alert_cooldown)
+        self._last_alert: float | None = None
         self._lock = threading.Lock()
 
     def is_allowlisted(self, ip: str) -> bool:
@@ -97,6 +109,7 @@ class Shield:
         now = time.monotonic() if now is None else now
         self.monitor.record(now)
         self._maybe_cleanup(now)
+        self._maybe_alert(now)
 
         if self.is_allowlisted(ip):
             return ALLOW
@@ -133,3 +146,22 @@ class Shield:
             self._next_cleanup = now + self.cleanup_interval
         self.limiter.prune(now)
         self.blocklist.sweep(now)
+
+    def _maybe_alert(self, now: float) -> None:
+        if not self.monitor.is_under_attack(now):
+            return
+        with self._lock:
+            if (
+                self._last_alert is not None
+                and now - self._last_alert < self.alert_cooldown
+            ):
+                return
+            self._last_alert = now
+        rate = self.monitor.current_rate(now)
+        logger.warning("Traffic spike: %.1f req/s (threshold %.1f)",
+                       rate, self.monitor.spike_threshold)
+        if self.on_attack is not None:
+            try:
+                self.on_attack(rate)
+            except Exception:  # an alert hook must never take the app down
+                logger.exception("on_attack callback failed")
