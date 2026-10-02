@@ -18,3 +18,5 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -r requirements.txt
       - run: python -m unittest -v
+      - name: Traffic simulation smoke test
+        run: python examples/simulate.py
