@@ -118,6 +118,13 @@ def main():
     )
     print("Legitimate requests blocked:", legit_blocked)
 
+    # Non-zero exit if protection misbehaved, so CI can run this as a check.
+    scraper_served = results["scraper"][200]
+    if legit_blocked or scraper_served > 20 or not alerts:
+        print("UNEXPECTED RESULT")
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
