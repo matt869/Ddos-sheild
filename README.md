@@ -19,8 +19,15 @@ sudden traffic spikes, and (optionally) auto-blocking offenders at the firewall.
   raises alerts before your service falls over.
 - **Auto blocklist** — temporarily bans IPs that cross a threshold, with an
   optional `iptables` hook to drop them at the kernel level.
+- **Allowlist** — trusted IPs and CIDR ranges (health checks, your load
+  balancer, internal networks) are never limited.
+- **Attack alerts** — an `on_attack` callback fires when site-wide traffic
+  spikes, with a cooldown so you get one page, not thousands.
+- **Bounded memory** — state for clients that have gone quiet is dropped
+  automatically, so a long-running server doesn't grow forever.
 - **Framework-friendly** — drop-in Flask middleware, plus a plain WSGI wrapper
-  so it works with anything.
+  so it works with anything (Django, Bottle, Falcon, ...).
+- **YAML config** — load all settings from a config file.
 - **Zero heavy dependencies** — pure standard library at its core.
 
 ---
@@ -67,7 +74,61 @@ You'll see `200`s turn into `429 Too Many Requests` once the limit trips.
 
 ---
 
+## See it handle realistic traffic
+
+```bash
+python examples/simulate.py
+```
+
+Starts a protected app on `127.0.0.1` and plays normal visitors, an
+allowlisted health checker and a flooding scraper against it at once:
+
+```
+client            sent  200 OK   429   403
+------------------------------------------
+visitor 1            8       8     0     0
+...
+health checker      40      40     0     0
+scraper            400      20     1   379
+
+Spike alert fired 1x (peak 40 req/s).
+Legitimate requests blocked: 0
+```
+
+---
+
+## Any WSGI app
+
+```python
+from ddos_shield.wsgi import ShieldMiddleware
+
+application = ShieldMiddleware(
+    application,
+    max_requests=60,
+    window_seconds=60,
+    allowlist=["10.0.0.0/8"],
+    on_attack=lambda rate: page_on_call(f"{rate:.0f} req/s"),
+)
+```
+
+Behind a reverse proxy you control, pass `trust_forwarded_for=True` so clients
+are identified by `X-Forwarded-For` instead of the proxy's address.
+
+---
+
 ## Using the pieces directly
+
+### Shield (everything combined)
+
+```python
+from ddos_shield import Shield
+
+shield = Shield(max_requests=60, window_seconds=60, ban_seconds=300)
+
+decision = shield.check("203.0.113.7")
+if not decision.allowed:
+    reject(decision.status, retry_after=decision.retry_after)  # 429 or 403
+```
 
 ### Rate limiter
 
@@ -115,6 +176,15 @@ firewall via `iptables -A INPUT -s <ip> -j DROP`.
 Copy `config.example.yaml` to `config.yaml` and tune the thresholds to your
 traffic. Start conservative and watch your logs before tightening.
 
+```python
+from ddos_shield.config import load_config
+
+protect(app, **load_config("config.yaml"))
+```
+
+Unknown keys are rejected, so a typo can't silently leave you on defaults.
+Needs PyYAML (`pip install ".[yaml]"`).
+
 ---
 
 ## Running tests
@@ -123,7 +193,8 @@ traffic. Start conservative and watch your logs before tightening.
 python -m unittest -v
 ```
 
-The Flask middleware tests are skipped unless Flask is installed
+Includes end-to-end tests that run a real HTTP server on `127.0.0.1`. The
+Flask and YAML tests are skipped unless those packages are installed
 (`pip install -r requirements.txt`).
 
 ---
