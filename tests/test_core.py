@@ -30,5 +30,27 @@ class ShieldTests(unittest.TestCase):
         self.assertTrue(shield.check("ip", now=31).allowed)
 
 
+class AllowlistTests(unittest.TestCase):
+    def test_allowlisted_ip_never_limited(self):
+        shield = Shield(max_requests=1, window_seconds=10, allowlist=["127.0.0.1"])
+        self.assertTrue(all(shield.check("127.0.0.1", now=0).allowed for _ in range(50)))
+
+    def test_cidr_range(self):
+        shield = Shield(max_requests=1, window_seconds=10, allowlist=["10.0.0.0/8"])
+        for _ in range(5):
+            self.assertTrue(shield.check("10.20.30.40", now=0).allowed)
+        shield.check("11.0.0.1", now=0)
+        self.assertFalse(shield.check("11.0.0.1", now=0).allowed)
+
+    def test_ipv6_and_garbage(self):
+        shield = Shield(allowlist=["2001:db8::/32"])
+        self.assertTrue(shield.is_allowlisted("2001:db8::1"))
+        self.assertFalse(shield.is_allowlisted("unknown"))
+
+    def test_invalid_entry_rejected(self):
+        with self.assertRaises(ValueError):
+            Shield(allowlist=["not-an-ip"])
+
+
 if __name__ == "__main__":
     unittest.main()

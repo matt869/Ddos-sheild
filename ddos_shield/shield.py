@@ -11,10 +11,11 @@ one question per request: let it through, or reject it (and how)?
 
 from __future__ import annotations
 
+import ipaddress
 import math
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
 from .blocklist import BlockList
 from .monitor import TrafficMonitor
@@ -56,17 +57,37 @@ class Shield:
         use_iptables: bool = False,
         spike_threshold: float = 500.0,
         sample_seconds: float = 5.0,
+        allowlist: Iterable[str] = (),
     ) -> None:
+        """``allowlist`` takes IPs or CIDR ranges (e.g. ``"10.0.0.0/8"``) that are
+        never limited — health checks, internal networks, your load balancer.
+        """
         self.limiter = RateLimiter(max_requests=max_requests, window_seconds=window_seconds)
         self.blocklist = BlockList(ban_seconds=ban_seconds, use_iptables=use_iptables)
         self.monitor = TrafficMonitor(
             spike_threshold=spike_threshold, sample_seconds=sample_seconds
         )
+        # strict=False lets "10.0.0.1/8" mean the whole 10.0.0.0/8 network.
+        self.allowlist = tuple(
+            ipaddress.ip_network(entry, strict=False) for entry in allowlist
+        )
+
+    def is_allowlisted(self, ip: str) -> bool:
+        if not self.allowlist:
+            return False
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        return any(addr in net for net in self.allowlist)
 
     def check(self, ip: str, now: float | None = None) -> Decision:
         """Record a request from ``ip`` and decide whether to serve it."""
         now = time.monotonic() if now is None else now
         self.monitor.record(now)
+
+        if self.is_allowlisted(ip):
+            return ALLOW
 
         if self.blocklist.is_banned(ip, now):
             return Decision(

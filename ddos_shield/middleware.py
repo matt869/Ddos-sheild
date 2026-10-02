@@ -30,8 +30,12 @@ def protect(
     spike_threshold: float = 500.0,
     sample_seconds: float = 5.0,
     trust_forwarded_for: bool = False,
+    **options: Any,
 ) -> Shield:
-    """Attach DDoS Shield protection to a Flask ``app``. Returns the ``Shield``."""
+    """Attach DDoS Shield protection to a Flask ``app``. Returns the ``Shield``.
+
+    Extra keyword ``options`` (e.g. ``allowlist``) are passed to ``Shield``.
+    """
     from flask import request, jsonify  # imported lazily so Flask stays optional
 
     shield = Shield(
@@ -41,6 +45,7 @@ def protect(
         use_iptables=use_iptables,
         spike_threshold=spike_threshold,
         sample_seconds=sample_seconds,
+        **options,
     )
 
     # Expose components for tests / advanced tuning.

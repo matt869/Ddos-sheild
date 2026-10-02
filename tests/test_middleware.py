@@ -65,6 +65,11 @@ class ProtectTests(unittest.TestCase):
         self.assertEqual(monitor.spike_threshold, 50)
         self.assertEqual(monitor.sample_seconds, 2)
 
+    def test_allowlist_option(self):
+        client = self.make_client(max_requests=1, window_seconds=10, allowlist=["127.0.0.1"])
+        codes = {client.get("/").status_code for _ in range(5)}
+        self.assertEqual(codes, {200})
+
 
 if __name__ == "__main__":
     unittest.main()
