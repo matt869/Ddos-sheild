@@ -57,6 +57,21 @@ class ShieldMiddlewareTests(unittest.TestCase):
         # Same proxy address, different real client -> allowed.
         self.assertEqual(call(app, ip="10.0.0.1", forwarded="198.51.100.2")[0], "200 OK")
 
+    def test_exempt_paths_are_never_limited(self):
+        app = ShieldMiddleware(hello_app, max_requests=1, exempt_paths=["/health"])
+
+        def get(path):
+            environ = {"REMOTE_ADDR": "203.0.113.7", "PATH_INFO": path}
+            setup_testing_defaults(environ)
+            status = []
+            app(environ, lambda s, h: status.append(s))
+            return status[0]
+
+        self.assertEqual([get("/health") for _ in range(5)], ["200 OK"] * 5)
+        self.assertEqual(get("/"), "200 OK")  # health checks didn't use the budget
+        self.assertTrue(get("/").startswith("429"))
+        self.assertEqual(get("/health"), "200 OK")  # still reachable while banned
+
     def test_accepts_existing_shield(self):
         shield = Shield(max_requests=1)
         app = ShieldMiddleware(hello_app, shield=shield)

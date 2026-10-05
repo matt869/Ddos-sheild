@@ -17,13 +17,13 @@ async def hello_app(scope, receive, send):
     await send({"type": "http.response.body", "body": b"hello"})
 
 
-def call(app, scope_type="http", ip="203.0.113.7", forwarded=None):
+def call(app, scope_type="http", ip="203.0.113.7", forwarded=None, path="/"):
     """Run one request through ``app``; returns the list of sent messages."""
     headers = [(b"host", b"example.test")]
     if forwarded:
         headers.append((b"x-forwarded-for", forwarded.encode()))
     scope = {"type": scope_type, "client": (ip, 50000), "headers": headers,
-             "path": "/", "method": "GET"}
+             "path": path, "method": "GET"}
     sent = []
 
     async def receive():
@@ -81,6 +81,12 @@ class ShieldASGIMiddlewareTests(unittest.TestCase):
         trusted = ShieldASGIMiddleware(hello_app, trust_forwarded_for=True, max_requests=1)
         call(trusted, ip="10.0.0.1", forwarded="198.51.100.1")
         self.assertEqual(status_of(call(trusted, ip="10.0.0.1", forwarded="198.51.100.2")), 200)
+
+    def test_exempt_paths_reachable_while_banned(self):
+        app = ShieldASGIMiddleware(hello_app, max_requests=1, exempt_paths=["/shield/stats"])
+        call(app)
+        self.assertEqual(status_of(call(app)), 429)
+        self.assertEqual(status_of(call(app, path="/shield/stats")), 200)
 
     def test_missing_client_is_unknown(self):
         app = ShieldASGIMiddleware(hello_app, max_requests=1)

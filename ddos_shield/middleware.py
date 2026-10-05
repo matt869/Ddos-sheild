@@ -14,7 +14,7 @@ how long until the ban lifts.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
 from .shield import Shield, client_ip
 
@@ -30,11 +30,13 @@ def protect(
     spike_threshold: float = 500.0,
     sample_seconds: float = 5.0,
     trust_forwarded_for: bool = False,
+    exempt_paths: Iterable[str] = (),
     **options: Any,
 ) -> Shield:
     """Attach DDoS Shield protection to a Flask ``app``. Returns the ``Shield``.
 
-    Extra keyword ``options`` (e.g. ``allowlist``) are passed to ``Shield``.
+    Requests to ``exempt_paths`` (e.g. ``"/health"``) are never checked or
+    counted. Extra keyword ``options`` (e.g. ``allowlist``) go to ``Shield``.
     """
     from flask import jsonify, request  # imported lazily so Flask stays optional
 
@@ -48,6 +50,8 @@ def protect(
         **options,
     )
 
+    exempt = frozenset(exempt_paths)
+
     # Expose components for tests / advanced tuning.
     app.extensions = getattr(app, "extensions", {})
     app.extensions["ddos_shield"] = {
@@ -59,6 +63,9 @@ def protect(
 
     @app.before_request
     def _guard():
+        if request.path in exempt:
+            return None
+
         ip = (
             client_ip(request.headers, request.remote_addr)
             if trust_forwarded_for

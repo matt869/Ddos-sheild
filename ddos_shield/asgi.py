@@ -16,7 +16,7 @@ code 1008 (policy violation), which servers turn into an HTTP 403.
 from __future__ import annotations
 
 import json
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Iterable, Optional
 
 from .shield import Shield, client_ip
 
@@ -33,18 +33,26 @@ class ShieldASGIMiddleware:
         app: Callable[[Scope, Receive, Send], Awaitable[None]],
         shield: Optional[Shield] = None,
         trust_forwarded_for: bool = False,
+        exempt_paths: Iterable[str] = (),
         **options: Any,
     ) -> None:
-        """Pass a ready-made ``shield``, or ``Shield`` keyword ``options``."""
+        """Pass a ready-made ``shield``, or ``Shield`` keyword ``options``.
+
+        Requests to ``exempt_paths`` (e.g. ``"/health"``) are never checked.
+        """
         if shield is not None and options:
             raise TypeError("pass either a Shield or Shield options, not both")
         self.app = app
         self.shield = shield if shield is not None else Shield(**options)
         self.trust_forwarded_for = trust_forwarded_for
+        self.exempt_paths = frozenset(exempt_paths)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] not in ("http", "websocket"):
-            await self.app(scope, receive, send)  # e.g. lifespan events
+        if (
+            scope["type"] not in ("http", "websocket")  # e.g. lifespan events
+            or scope.get("path", "") in self.exempt_paths
+        ):
+            await self.app(scope, receive, send)
             return
 
         decision = self.shield.check(self._client_ip(scope))

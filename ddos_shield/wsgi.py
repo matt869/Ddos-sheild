@@ -27,16 +27,24 @@ class ShieldMiddleware:
         app: Callable[..., Iterable[bytes]],
         shield: Optional[Shield] = None,
         trust_forwarded_for: bool = False,
+        exempt_paths: Iterable[str] = (),
         **options: Any,
     ) -> None:
-        """Pass a ready-made ``shield``, or ``Shield`` keyword ``options``."""
+        """Pass a ready-made ``shield``, or ``Shield`` keyword ``options``.
+
+        Requests to ``exempt_paths`` (e.g. ``"/health"``) are never checked.
+        """
         if shield is not None and options:
             raise TypeError("pass either a Shield or Shield options, not both")
         self.app = app
         self.shield = shield if shield is not None else Shield(**options)
         self.trust_forwarded_for = trust_forwarded_for
+        self.exempt_paths = frozenset(exempt_paths)
 
     def __call__(self, environ: dict, start_response: Callable) -> Iterable[bytes]:
+        if environ.get("PATH_INFO", "") in self.exempt_paths:
+            return self.app(environ, start_response)
+
         remote_addr = environ.get("REMOTE_ADDR", "")
         if self.trust_forwarded_for:
             headers = {"X-Forwarded-For": environ.get("HTTP_X_FORWARDED_FOR", "")}
