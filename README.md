@@ -25,8 +25,11 @@ sudden traffic spikes, and (optionally) auto-blocking offenders at the firewall.
   spikes, with a cooldown so you get one page, not thousands.
 - **Bounded memory** — state for clients that have gone quiet is dropped
   automatically, so a long-running server doesn't grow forever.
-- **Framework-friendly** — drop-in Flask middleware, plus a plain WSGI wrapper
-  so it works with anything (Django, Bottle, Falcon, ...).
+- **Framework-friendly** — drop-in middleware for Flask, any WSGI app
+  (Django, Bottle, Falcon, ...) and any ASGI app (FastAPI, Starlette, Quart).
+- **Exempt paths** — health checks and stats pages stay reachable, even for a
+  banned client.
+- **Live stats** — `shield.stats()` for dashboards and metrics exporters.
 - **YAML config** — load all settings from a config file.
 - **Zero heavy dependencies** — pure standard library at its core.
 
@@ -116,6 +119,26 @@ are identified by `X-Forwarded-For` instead of the proxy's address.
 
 ---
 
+## FastAPI / any ASGI app
+
+```python
+from fastapi import FastAPI
+from ddos_shield.asgi import ShieldASGIMiddleware
+
+app = FastAPI()
+app.add_middleware(
+    ShieldASGIMiddleware,
+    max_requests=60,
+    window_seconds=60,
+    exempt_paths=["/health"],
+)
+```
+
+Rejected WebSocket handshakes are closed with code 1008. A full demo with a
+live `/shield/stats` endpoint is in `examples/fastapi_app.py`.
+
+---
+
 ## Using the pieces directly
 
 ### Shield (everything combined)
@@ -128,6 +151,12 @@ shield = Shield(max_requests=60, window_seconds=60, ban_seconds=300)
 decision = shield.check("203.0.113.7")
 if not decision.allowed:
     reject(decision.status, retry_after=decision.retry_after)  # 429 or 403
+
+shield.stats()
+# {'requests': {'allowed': 912, 'allowlisted': 40, 'rate_limited': 3, 'blocked': 211},
+#  'current_rate': 12.4, 'under_attack': False, 'active_bans': 3, 'tracked_clients': 57}
+
+shield.blocklist.banned()   # {'203.0.113.66': 241.7, ...} seconds left per ban
 ```
 
 ### Rate limiter
@@ -183,7 +212,16 @@ protect(app, **load_config("config.yaml"))
 ```
 
 Unknown keys are rejected, so a typo can't silently leave you on defaults.
-Needs PyYAML (`pip install ".[yaml]"`).
+Needs PyYAML (`pip install ".[yaml]"`). Check a file before deploying it:
+
+```bash
+$ python -m ddos_shield check-config config.yaml
+config.yaml: OK
+  rate limit : 60 requests per 60s per client
+  ban        : 300s
+  spike alert: 500 req/s over 5s
+  allowlist  : 127.0.0.1/32, 10.0.0.0/8
+```
 
 ---
 
