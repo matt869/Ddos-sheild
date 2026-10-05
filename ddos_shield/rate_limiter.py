@@ -65,6 +65,11 @@ class RateLimiter:
                 hits.popleft()
             return max(0, self.max_requests - len(hits))
 
+    def tracked_clients(self) -> int:
+        """Number of clients currently held in memory."""
+        with self._lock:
+            return len(self._hits)
+
     def reset(self, key: str) -> None:
         """Forget all recorded activity for ``key``."""
         with self._lock:

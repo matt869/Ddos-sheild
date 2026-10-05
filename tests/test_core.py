@@ -29,6 +29,19 @@ class ShieldTests(unittest.TestCase):
         shield.check("ip", now=0)  # banned
         self.assertTrue(shield.check("ip", now=31).allowed)
 
+    def test_stats(self):
+        shield = Shield(max_requests=2, window_seconds=10, ban_seconds=30,
+                        spike_threshold=100, sample_seconds=1, allowlist=["10.0.0.1"])
+        for ip in ["a", "a", "a", "a", "b", "10.0.0.1"]:
+            shield.check(ip, now=0)
+        stats = shield.stats(now=0)
+        self.assertEqual(stats["requests"], {"allowed": 3, "allowlisted": 1,
+                                             "rate_limited": 1, "blocked": 1})
+        self.assertEqual(stats["current_rate"], 6.0)
+        self.assertFalse(stats["under_attack"])
+        self.assertEqual(stats["active_bans"], 1)
+        self.assertEqual(stats["tracked_clients"], 2)
+
 
 class AllowlistTests(unittest.TestCase):
     def test_allowlisted_ip_never_limited(self):

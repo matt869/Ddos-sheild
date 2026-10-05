@@ -17,7 +17,7 @@ import math
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional
 
 from .blocklist import BlockList
 from .monitor import TrafficMonitor
@@ -96,6 +96,7 @@ class Shield:
         self.alert_cooldown = float(alert_cooldown)
         self._last_alert: float | None = None
         self._lock = threading.Lock()
+        self._counts = {"allowed": 0, "allowlisted": 0, "rate_limited": 0, "blocked": 0}
 
     def is_allowlisted(self, ip: str) -> bool:
         if not self.allowlist:
@@ -114,9 +115,11 @@ class Shield:
         self._maybe_alert(now)
 
         if self.is_allowlisted(ip):
+            self._count("allowlisted")
             return ALLOW
 
         if self.blocklist.is_banned(ip, now):
+            self._count("blocked")
             return Decision(
                 allowed=False,
                 status=403,
@@ -128,6 +131,7 @@ class Shield:
         if not self.limiter.allow(ip, now):
             # Over the limit -> ban, so further requests are rejected cheaply.
             self.blocklist.ban(ip, now)
+            self._count("rate_limited")
             return Decision(
                 allowed=False,
                 status=429,
@@ -136,7 +140,30 @@ class Shield:
                 retry_after=math.ceil(self.blocklist.ban_seconds),
             )
 
+        self._count("allowed")
         return ALLOW
+
+    def stats(self, now: float | None = None) -> Dict[str, Any]:
+        """Snapshot for dashboards and metrics exporters.
+
+        Counters are cumulative since the Shield was created; ``current_rate``
+        and ``under_attack`` describe the last ``sample_seconds``.
+        """
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            counts = dict(self._counts)
+        rate = self.monitor.current_rate(now)
+        return {
+            "requests": counts,
+            "current_rate": rate,
+            "under_attack": rate >= self.monitor.spike_threshold,
+            "active_bans": len(self.blocklist.banned(now)),
+            "tracked_clients": self.limiter.tracked_clients(),
+        }
+
+    def _count(self, outcome: str) -> None:
+        with self._lock:
+            self._counts[outcome] += 1
 
     def _maybe_cleanup(self, now: float) -> None:
         with self._lock:
