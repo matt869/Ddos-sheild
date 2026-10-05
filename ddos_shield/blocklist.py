@@ -64,6 +64,16 @@ class BlockList:
             return 0.0
         return max(0.0, expiry - now)
 
+    def banned(self, now: float | None = None) -> Dict[str, float]:
+        """Snapshot of active bans: ``{ip: seconds remaining}``."""
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            return {
+                ip: expiry - now
+                for ip, expiry in self._banned.items()
+                if expiry > now
+            }
+
     def unban(self, ip: str) -> None:
         with self._lock:
             removed = self._banned.pop(ip, None) is not None

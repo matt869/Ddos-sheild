@@ -69,6 +69,13 @@ class BlockListTests(unittest.TestCase):
         self.assertEqual(bl.time_remaining("ip", now=4), 6.0)
         self.assertEqual(bl.time_remaining("ip", now=50), 0.0)
 
+    def test_banned_snapshot(self):
+        bl = BlockList(ban_seconds=10, use_iptables=False)
+        bl.ban("a", now=0)
+        bl.ban("b", now=5)
+        self.assertEqual(bl.banned(now=8), {"a": 2.0, "b": 7.0})
+        self.assertEqual(bl.banned(now=12), {"b": 3.0})
+
     def test_unban(self):
         bl = BlockList(ban_seconds=10, use_iptables=False)
         bl.ban("ip", now=0)
