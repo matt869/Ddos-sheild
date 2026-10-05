@@ -22,5 +22,8 @@ Homepage = "https://github.com/matt869/Ddos-sheild"
 [tool.setuptools]
 packages = ["ddos_shield"]
 
+[tool.setuptools.package-data]
+ddos_shield = ["py.typed"]
+
 [tool.setuptools.dynamic]
 version = { attr = "ddos_shield.__version__" }
