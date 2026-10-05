@@ -48,10 +48,7 @@ class ShieldMiddleware:
         if decision.allowed:
             return self.app(environ, start_response)
 
-        payload = {"error": decision.error}
-        if decision.status == 403:
-            payload["reason"] = decision.reason
-        body = json.dumps(payload).encode("utf-8")
+        body = json.dumps(decision.payload()).encode("utf-8")
         status = HTTPStatus(decision.status)
         start_response(
             f"{status.value} {status.phrase}",

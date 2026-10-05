@@ -69,10 +69,7 @@ def protect(
         if decision.allowed:
             return None  # let the request through
 
-        body = {"error": decision.error}
-        if decision.status == 403:
-            body["reason"] = decision.reason
-        resp = jsonify(body)
+        resp = jsonify(decision.payload())
         resp.status_code = decision.status
         resp.headers["Retry-After"] = str(decision.retry_after)
         return resp

@@ -36,6 +36,13 @@ class Decision:
     reason: str = ""
     retry_after: int = 0
 
+    def payload(self) -> Dict[str, str]:
+        """JSON body for a rejected request."""
+        body = {"error": self.error}
+        if self.status == 403:
+            body["reason"] = self.reason
+        return body
+
 
 ALLOW = Decision(allowed=True)
 
