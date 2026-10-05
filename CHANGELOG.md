@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.0
+
+- New `ShieldASGIMiddleware` for FastAPI, Starlette, Quart and other ASGI apps,
+  including WebSocket handshakes. Verified against a live uvicorn server.
+- `exempt_paths` on every integration keeps health checks and stats pages
+  reachable, even for banned clients.
+- `Shield.stats()` and `BlockList.banned()` for dashboards and metrics.
+- `python -m ddos_shield check-config` validates a config file.
+- Type hints ship with the package (`py.typed`); ruff linting runs in CI.
+- `alert_cooldown` must not be negative.
+
 ## 1.2.0
 
 - New `Shield` core shared by every integration; `protect()` now returns it.

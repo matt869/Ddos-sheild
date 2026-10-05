@@ -14,4 +14,4 @@ from .rate_limiter import RateLimiter
 from .shield import Decision, Shield
 
 __all__ = ["RateLimiter", "TrafficMonitor", "BlockList", "Shield", "Decision"]
-__version__ = "1.2.0"
+__version__ = "1.3.0"
