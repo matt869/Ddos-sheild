@@ -86,6 +86,10 @@ class AttackAlertTests(unittest.TestCase):
             shield.check("ip", now=31)
         self.assertEqual(len(alerts), 2)          # cooldown passed, spike persists
 
+    def test_negative_cooldown_rejected(self):
+        with self.assertRaises(ValueError):
+            Shield(alert_cooldown=-1)
+
     def test_broken_callback_does_not_break_requests(self):
         def boom(rate):
             raise RuntimeError("pager down")

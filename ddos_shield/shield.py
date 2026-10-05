@@ -79,6 +79,8 @@ class Shield:
         """
         if cleanup_interval <= 0:
             raise ValueError("cleanup_interval must be positive")
+        if alert_cooldown < 0:
+            raise ValueError("alert_cooldown must not be negative")
         self.limiter = RateLimiter(max_requests=max_requests, window_seconds=window_seconds)
         self.blocklist = BlockList(ban_seconds=ban_seconds, use_iptables=use_iptables)
         self.monitor = TrafficMonitor(
