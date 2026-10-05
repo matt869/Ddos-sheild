@@ -26,7 +26,8 @@ from ddos_shield.asgi import ShieldASGIMiddleware  # noqa: E402
 shield = Shield(max_requests=10, window_seconds=10, ban_seconds=30)
 
 app = FastAPI()
-app.add_middleware(ShieldASGIMiddleware, shield=shield)
+# The stats page stays reachable even while you're banned.
+app.add_middleware(ShieldASGIMiddleware, shield=shield, exempt_paths=["/shield/stats"])
 
 
 @app.get("/")
@@ -37,7 +38,8 @@ def home():
 @app.get("/shield/stats")
 def shield_stats():
     # In production put this behind auth or on an internal-only port.
-    return {**shield.stats(), "bans": shield.blocklist.banned()}
+    bans = {ip: round(left, 1) for ip, left in shield.blocklist.banned().items()}
+    return {**shield.stats(), "bans": bans}
 
 
 if __name__ == "__main__":
