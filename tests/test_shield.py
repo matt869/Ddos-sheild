@@ -6,7 +6,7 @@ Tests inject an explicit clock so they are fast and deterministic.
 
 import unittest
 
-from ddos_shield import RateLimiter, TrafficMonitor, BlockList
+from ddos_shield import BlockList, RateLimiter, TrafficMonitor
 
 
 class RateLimiterTests(unittest.TestCase):

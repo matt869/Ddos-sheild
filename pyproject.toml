@@ -27,3 +27,10 @@ ddos_shield = ["py.typed"]
 
 [tool.setuptools.dynamic]
 version = { attr = "ddos_shield.__version__" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]

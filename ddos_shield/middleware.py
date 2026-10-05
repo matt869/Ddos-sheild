@@ -36,7 +36,7 @@ def protect(
 
     Extra keyword ``options`` (e.g. ``allowlist``) are passed to ``Shield``.
     """
-    from flask import request, jsonify  # imported lazily so Flask stays optional
+    from flask import jsonify, request  # imported lazily so Flask stays optional
 
     shield = Shield(
         max_requests=max_requests,

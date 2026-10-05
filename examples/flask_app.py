@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flask import Flask  # noqa: E402
+
 from ddos_shield.middleware import protect  # noqa: E402
 
 app = Flask(__name__)

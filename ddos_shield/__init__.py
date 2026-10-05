@@ -8,9 +8,9 @@ Public API:
     protect         - one-call Flask protection (see ddos_shield.middleware)
 """
 
-from .rate_limiter import RateLimiter
-from .monitor import TrafficMonitor
 from .blocklist import BlockList
+from .monitor import TrafficMonitor
+from .rate_limiter import RateLimiter
 from .shield import Decision, Shield
 
 __all__ = ["RateLimiter", "TrafficMonitor", "BlockList", "Shield", "Decision"]
