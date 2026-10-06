@@ -1,4 +1,5 @@
 # Core library uses only the Python standard library.
-# These are only needed to run the Flask example in examples/flask_app.py.
-Flask>=3.0
-PyYAML>=6.0
+# These are optional extras, used by the examples and the full test suite.
+Flask>=3.0                 # Flask integration + examples/flask_app.py
+PyYAML>=6.0                # load_config / check-config
+prometheus-client>=0.17    # only to validate /metrics output in the tests
