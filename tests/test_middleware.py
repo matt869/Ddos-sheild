@@ -77,6 +77,18 @@ class ProtectTests(unittest.TestCase):
         self.assertEqual(client.get("/").status_code, 429)
         self.assertEqual(client.get("/health").status_code, 200)
 
+    def test_path_limits(self):
+        from ddos_shield.middleware import protect
+
+        app = flask.Flask(__name__)
+        protect(app, max_requests=100, path_limits={"/login": (2, 60)})
+        app.add_url_rule("/", "home", lambda: "ok")
+        app.add_url_rule("/login", "login", lambda: "ok", methods=["POST"])
+        client = app.test_client()
+        codes = [client.post("/login").status_code for _ in range(3)]
+        self.assertEqual(codes, [200, 200, 429])
+        self.assertEqual(client.get("/").status_code, 200)
+
     def test_allowlist_option(self):
         client = self.make_client(max_requests=1, window_seconds=10, allowlist=["127.0.0.1"])
         codes = {client.get("/").status_code for _ in range(5)}
