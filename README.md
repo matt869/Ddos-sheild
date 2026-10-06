@@ -29,7 +29,14 @@ sudden traffic spikes, and (optionally) auto-blocking offenders at the firewall.
   (Django, Bottle, Falcon, ...) and any ASGI app (FastAPI, Starlette, Quart).
 - **Exempt paths** — health checks and stats pages stay reachable, even for a
   banned client.
-- **Live stats** — `shield.stats()` for dashboards and metrics exporters.
+- **Live stats** — `shield.stats()` for dashboards, plus a built-in
+  Prometheus `/metrics` exporter.
+- **Login protection** — stricter per-path limits (e.g. 5 attempts a minute
+  on `/login`) that stop password guessing without banning the whole site.
+- **Escalating bans** — repeat offenders get longer bans each time.
+- **IPv6-aware** — clients are grouped by /64, so a bot rotating through its
+  IPv6 block can't get a fresh budget per address.
+- **Ban events** — an `on_ban` hook for your logs, SIEM or chat.
 - **YAML config** — load all settings from a config file.
 - **Zero heavy dependencies** — pure standard library at its core.
 
@@ -83,20 +90,47 @@ You'll see `200`s turn into `429 Too Many Requests` once the limit trips.
 python examples/simulate.py
 ```
 
-Starts a protected app on `127.0.0.1` and plays normal visitors, an
-allowlisted health checker and a flooding scraper against it at once:
+Starts a protected app on `127.0.0.1` and plays real users and three kinds of
+attacker against it at once:
 
 ```
-client            sent  200 OK   429   403
-------------------------------------------
-visitor 1            8       8     0     0
+client            path      sent  200 OK   429   403
+----------------------------------------------------
+visitor 1         /            8       8     0     0
 ...
-health checker      40      40     0     0
-scraper            400      20     1   379
+returning user    /login       2       2     0     0
+health checker    /           40      40     0     0
+scraper           /          400      20     1   379
+password guesser  /login      60       5    16    39
+IPv6 rotator      /          200      20     1   179
 
 Spike alert fired 1x (peak 40 req/s).
+Banned: 2001:db8:bad:1::/64, 203.0.113.66, 203.0.113.99
 Legitimate requests blocked: 0
 ```
+
+It exits non-zero if any attacker gets through or any real user is blocked,
+and runs in CI on every push.
+
+---
+
+## Hardening options
+
+```python
+shield = Shield(
+    max_requests=60, window_seconds=60, ban_seconds=300,
+    path_limits={"/login": (5, 60), "/api/upload": (10, 3600)},
+    ban_multiplier=4, max_ban_seconds=86_400,   # 5 min, 20 min, 80 min, ... 1 day
+    ipv6_prefix=64,                             # default; 128 = per address
+    on_ban=lambda client, secs: log.warning("banned %s for %ds", client, secs),
+)
+```
+
+- **`path_limits`** cover the path and everything below it; the longest match
+  wins. Going over one returns 429 for that route only, so a user who mistypes
+  a password can still browse.
+- **`ban_multiplier`** applies to bans within an hour of the previous one;
+  offense history is forgotten after that.
 
 ---
 
@@ -134,8 +168,26 @@ app.add_middleware(
 )
 ```
 
-Rejected WebSocket handshakes are closed with code 1008. A full demo with a
-live `/shield/stats` endpoint is in `examples/fastapi_app.py`.
+Rejected WebSocket handshakes are closed with code 1008. A full demo with
+live `/shield/stats` and Prometheus `/metrics` endpoints is in
+`examples/fastapi_app.py`.
+
+---
+
+## Prometheus
+
+```python
+from ddos_shield.metrics import CONTENT_TYPE, prometheus_text
+
+@app.get("/metrics")
+def metrics():
+    return Response(prometheus_text(shield), media_type=CONTENT_TYPE)
+```
+
+Exposes `ddos_shield_requests_total{outcome=...}`, `ddos_shield_request_rate`,
+`ddos_shield_under_attack`, `ddos_shield_active_bans` and
+`ddos_shield_tracked_clients`. Add the path to `exempt_paths` so scrapes are
+never limited.
 
 ---
 
