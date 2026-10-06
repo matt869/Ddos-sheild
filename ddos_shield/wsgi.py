@@ -52,7 +52,7 @@ class ShieldMiddleware:
         else:
             ip = remote_addr or "unknown"
 
-        decision = self.shield.check(ip)
+        decision = self.shield.check(ip, path=environ.get("PATH_INFO", "/"))
         if decision.allowed:
             return self.app(environ, start_response)
 

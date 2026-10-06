@@ -55,7 +55,7 @@ class ShieldASGIMiddleware:
             await self.app(scope, receive, send)
             return
 
-        decision = self.shield.check(self._client_ip(scope))
+        decision = self.shield.check(self._client_ip(scope), path=scope.get("path", "/"))
         if decision.allowed:
             await self.app(scope, receive, send)
         elif scope["type"] == "websocket":

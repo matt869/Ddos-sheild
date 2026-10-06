@@ -45,7 +45,8 @@ class ShieldTests(unittest.TestCase):
             shield.check(ip, now=0)
         stats = shield.stats(now=0)
         self.assertEqual(stats["requests"], {"allowed": 3, "allowlisted": 1,
-                                             "rate_limited": 1, "blocked": 1})
+                                             "rate_limited": 1, "path_limited": 0,
+                                             "blocked": 1})
         self.assertEqual(stats["current_rate"], 6.0)
         self.assertFalse(stats["under_attack"])
         self.assertEqual(stats["active_bans"], 1)
@@ -105,6 +106,72 @@ class ClientKeyTests(unittest.TestCase):
     def test_invalid_prefix(self):
         with self.assertRaises(ValueError):
             Shield(ipv6_prefix=0)
+
+
+class PathLimitTests(unittest.TestCase):
+    def make(self, **kwargs):
+        return Shield(max_requests=100, window_seconds=60,
+                      path_limits={"/login": (3, 60), "/api/": {"max_requests": 5,
+                                                                "window_seconds": 10}},
+                      **kwargs)
+
+    def test_login_brute_force_is_stopped(self):
+        shield = self.make()
+        codes = [shield.check("ip", now=t, path="/login").status for t in range(5)]
+        self.assertEqual(codes, [200, 200, 200, 429, 429])
+        d = shield.check("ip", now=5, path="/login")
+        self.assertEqual(d.reason, "rate limit exceeded for this path")
+        self.assertEqual(d.retry_after, 55)               # first attempt frees at 60
+
+    def test_rest_of_site_still_works(self):
+        shield = self.make()
+        for t in range(5):
+            shield.check("ip", now=t, path="/login")
+        self.assertTrue(shield.check("ip", now=5, path="/").allowed)
+        self.assertTrue(shield.check("other", now=5, path="/login").allowed)
+        self.assertEqual(shield.blocklist.banned(now=5), {})  # no site-wide ban
+
+    def test_sub_paths_and_lookalikes(self):
+        shield = self.make()
+        self.assertIsNotNone(shield.path_limiter("/api/users/7"))
+        self.assertIsNotNone(shield.path_limiter("/login/sso"))
+        self.assertIsNone(shield.path_limiter("/loginhelp"))
+        self.assertIsNone(shield.path_limiter("/"))
+
+    def test_longest_rule_wins(self):
+        shield = Shield(path_limits={"/api": (100, 60), "/api/upload": (1, 60)})
+        self.assertEqual(shield.path_limiter("/api/upload/x").max_requests, 1)
+        self.assertEqual(shield.path_limiter("/api/list").max_requests, 100)
+
+    def test_bad_rule(self):
+        with self.assertRaises(ValueError):
+            Shield(path_limits={"/login": {"max_request": 5}})
+
+    def test_counted_in_stats(self):
+        shield = self.make()
+        for t in range(4):
+            shield.check("ip", now=t, path="/login")
+        self.assertEqual(shield.stats(now=4)["requests"]["path_limited"], 1)
+
+
+class OnBanTests(unittest.TestCase):
+    def test_called_with_client_and_duration(self):
+        events = []
+        shield = Shield(max_requests=1, ban_seconds=30,
+                        on_ban=lambda client, secs: events.append((client, secs)))
+        shield.check("203.0.113.7", now=0)
+        shield.check("203.0.113.7", now=0)
+        shield.check("203.0.113.7", now=1)   # already banned: no second event
+        self.assertEqual(events, [("203.0.113.7", 30.0)])
+
+    def test_broken_hook_is_contained(self):
+        def boom(client, secs):
+            raise RuntimeError("slack down")
+
+        shield = Shield(max_requests=1, on_ban=boom)
+        shield.check("ip", now=0)
+        with self.assertLogs("ddos_shield", level="ERROR"):
+            self.assertEqual(shield.check("ip", now=0).status, 429)
 
 
 class CleanupTests(unittest.TestCase):

@@ -45,6 +45,7 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(shield.limiter.max_requests, 60)
         self.assertEqual(shield.blocklist.ban_seconds, 300)
         self.assertTrue(shield.is_allowlisted("10.1.2.3"))
+        self.assertEqual(shield.path_limiter("/login").max_requests, 5)
 
     def test_load_from_file(self):
         with tempfile.TemporaryDirectory() as tmp:

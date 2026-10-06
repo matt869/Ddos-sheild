@@ -17,13 +17,15 @@ import math
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple, Union
 
 from .blocklist import BlockList
 from .monitor import TrafficMonitor
 from .rate_limiter import RateLimiter
 
 logger = logging.getLogger("ddos_shield")
+
+PathLimit = Union[Tuple[int, float], Mapping[str, float]]
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,8 @@ class Shield:
         ban_multiplier: float = 1.0,
         max_ban_seconds: Optional[float] = None,
         ipv6_prefix: int = 64,
+        path_limits: Optional[Mapping[str, PathLimit]] = None,
+        on_ban: Optional[Callable[[str, float], None]] = None,
     ) -> None:
         """``allowlist`` takes IPs or CIDR ranges (e.g. ``"10.0.0.0/8"``) that are
         never limited — health checks, internal networks, your load balancer.
@@ -93,6 +97,15 @@ class Shield:
         IPv6 clients are grouped by their ``/ipv6_prefix`` network: one host
         usually controls a whole /64 and can rotate through it freely. Use 128
         to limit each IPv6 address separately.
+
+        ``path_limits`` adds stricter budgets for sensitive routes, e.g.
+        ``{"/login": (5, 60)}`` = 5 attempts per minute per client. A rule
+        covers the path and everything below it; the longest match wins.
+        Going over a path limit returns 429 for that route only — no site-wide
+        ban, so a user who mistypes a password can still browse.
+
+        ``on_ban(client, seconds)`` is called whenever a client is banned —
+        ship it to your logs, SIEM or chat.
         """
         if not 0 < ipv6_prefix <= 128:
             raise ValueError("ipv6_prefix must be between 1 and 128")
@@ -115,13 +128,24 @@ class Shield:
             ipaddress.ip_network(entry, strict=False) for entry in allowlist
         )
         self.ipv6_prefix = ipv6_prefix
+        self.path_limiters: Dict[str, RateLimiter] = {
+            path.rstrip("/") or "/": _path_limiter(path, rule)
+            for path, rule in (path_limits or {}).items()
+        }
+        self.on_ban = on_ban
         self.cleanup_interval = float(cleanup_interval)
         self._next_cleanup: float | None = None
         self.on_attack = on_attack
         self.alert_cooldown = float(alert_cooldown)
         self._last_alert: float | None = None
         self._lock = threading.Lock()
-        self._counts = {"allowed": 0, "allowlisted": 0, "rate_limited": 0, "blocked": 0}
+        self._counts = {
+            "allowed": 0,
+            "allowlisted": 0,
+            "rate_limited": 0,
+            "path_limited": 0,
+            "blocked": 0,
+        }
 
     def is_allowlisted(self, ip: str) -> bool:
         if not self.allowlist:
@@ -146,8 +170,19 @@ class Shield:
                 return str(ipaddress.ip_network(f"{addr}/{self.ipv6_prefix}", strict=False))
         return str(addr)
 
-    def check(self, ip: str, now: float | None = None) -> Decision:
-        """Record a request from ``ip`` and decide whether to serve it."""
+    def path_limiter(self, path: str) -> Optional[RateLimiter]:
+        """The limiter for the most specific ``path_limits`` rule covering ``path``."""
+        best = None
+        for rule in self.path_limiters:
+            if rule == "/" or path == rule or path.startswith(rule + "/"):
+                if best is None or len(rule) > len(best):
+                    best = rule
+        return None if best is None else self.path_limiters[best]
+
+    def check(
+        self, ip: str, now: float | None = None, *, path: Optional[str] = None
+    ) -> Decision:
+        """Record a request from ``ip`` (to ``path``) and decide whether to serve it."""
         now = time.monotonic() if now is None else now
         self.monitor.record(now)
         self._maybe_cleanup(now)
@@ -172,12 +207,24 @@ class Shield:
             # Over the limit -> ban, so further requests are rejected cheaply.
             duration = self.blocklist.ban(key, now)
             self._count("rate_limited")
+            self._notify_ban(key, duration)
             return Decision(
                 allowed=False,
                 status=429,
                 error="too_many_requests",
                 reason="rate limit exceeded",
                 retry_after=math.ceil(duration),
+            )
+
+        limiter = self.path_limiter(path) if path is not None else None
+        if limiter is not None and not limiter.allow(key, now):
+            self._count("path_limited")
+            return Decision(
+                allowed=False,
+                status=429,
+                error="too_many_requests",
+                reason="rate limit exceeded for this path",
+                retry_after=max(1, math.ceil(limiter.retry_after(key, now))),
             )
 
         self._count("allowed")
@@ -201,6 +248,14 @@ class Shield:
             "tracked_clients": self.limiter.tracked_clients(),
         }
 
+    def _notify_ban(self, key: str, duration: float) -> None:
+        if self.on_ban is None:
+            return
+        try:
+            self.on_ban(key, duration)
+        except Exception:  # a logging hook must never take the app down
+            logger.exception("on_ban callback failed")
+
     def _count(self, outcome: str) -> None:
         with self._lock:
             self._counts[outcome] += 1
@@ -214,6 +269,8 @@ class Shield:
                 return
             self._next_cleanup = now + self.cleanup_interval
         self.limiter.prune(now)
+        for limiter in self.path_limiters.values():
+            limiter.prune(now)
         self.blocklist.sweep(now)
 
     def _maybe_alert(self, now: float) -> None:
@@ -234,3 +291,13 @@ class Shield:
                 self.on_attack(rate)
             except Exception:  # an alert hook must never take the app down
                 logger.exception("on_attack callback failed")
+
+
+def _path_limiter(path: str, rule: PathLimit) -> RateLimiter:
+    if isinstance(rule, Mapping):
+        unknown = set(rule) - {"max_requests", "window_seconds"}
+        if unknown:
+            raise ValueError(f"unknown keys in path limit {path!r}: {sorted(unknown)}")
+        return RateLimiter(**rule)
+    max_requests, window_seconds = rule
+    return RateLimiter(max_requests=max_requests, window_seconds=window_seconds)

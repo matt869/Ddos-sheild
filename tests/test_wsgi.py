@@ -72,6 +72,20 @@ class ShieldMiddlewareTests(unittest.TestCase):
         self.assertTrue(get("/").startswith("429"))
         self.assertEqual(get("/health"), "200 OK")  # still reachable while banned
 
+    def test_path_limits_use_path_info(self):
+        app = ShieldMiddleware(hello_app, path_limits={"/login": (1, 60)})
+
+        def get(path):
+            environ = {"REMOTE_ADDR": "203.0.113.7", "PATH_INFO": path}
+            setup_testing_defaults(environ)
+            status = []
+            app(environ, lambda s, h: status.append(s))
+            return status[0]
+
+        self.assertEqual(get("/login"), "200 OK")
+        self.assertTrue(get("/login").startswith("429"))
+        self.assertEqual(get("/"), "200 OK")
+
     def test_accepts_existing_shield(self):
         shield = Shield(max_requests=1)
         app = ShieldMiddleware(hello_app, shield=shield)

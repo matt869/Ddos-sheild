@@ -72,7 +72,7 @@ def protect(
             else (request.remote_addr or "unknown")
         )
 
-        decision = shield.check(ip)
+        decision = shield.check(ip, path=request.path)
         if decision.allowed:
             return None  # let the request through
 

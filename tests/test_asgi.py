@@ -88,6 +88,12 @@ class ShieldASGIMiddlewareTests(unittest.TestCase):
         self.assertEqual(status_of(call(app)), 429)
         self.assertEqual(status_of(call(app, path="/shield/stats")), 200)
 
+    def test_path_limits_use_scope_path(self):
+        app = ShieldASGIMiddleware(hello_app, path_limits={"/login": (1, 60)})
+        self.assertEqual(status_of(call(app, path="/login")), 200)
+        self.assertEqual(status_of(call(app, path="/login")), 429)
+        self.assertEqual(status_of(call(app, path="/")), 200)
+
     def test_missing_client_is_unknown(self):
         app = ShieldASGIMiddleware(hello_app, max_requests=1)
         self.assertEqual(app._client_ip({"type": "http"}), "unknown")
