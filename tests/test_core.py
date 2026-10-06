@@ -74,6 +74,39 @@ class AllowlistTests(unittest.TestCase):
             Shield(allowlist=["not-an-ip"])
 
 
+class ClientKeyTests(unittest.TestCase):
+    def test_rotating_ipv6_attacker_is_one_client(self):
+        shield = Shield(max_requests=3, window_seconds=60)
+        codes = [shield.check(f"2001:db8:aa:bb::{i:x}", now=0).status for i in range(6)]
+        self.assertEqual(codes, [200, 200, 200, 429, 403, 403])
+        self.assertIn("2001:db8:aa:bb::/64", shield.blocklist.banned(now=0))
+
+    def test_neighbouring_ipv6_networks_are_separate(self):
+        shield = Shield(max_requests=1, window_seconds=60)
+        shield.check("2001:db8:aa:1::1", now=0)
+        self.assertTrue(shield.check("2001:db8:aa:2::1", now=0).allowed)
+
+    def test_per_address_ipv6(self):
+        shield = Shield(max_requests=1, window_seconds=60, ipv6_prefix=128)
+        shield.check("2001:db8::1", now=0)
+        self.assertTrue(shield.check("2001:db8::2", now=0).allowed)
+
+    def test_ipv4_mapped_is_treated_as_ipv4(self):
+        shield = Shield(max_requests=1, window_seconds=60)
+        shield.check("::ffff:203.0.113.7", now=0)
+        self.assertEqual(shield.check("203.0.113.7", now=0).status, 429)
+
+    def test_keys(self):
+        shield = Shield()
+        self.assertEqual(shield.client_key("203.0.113.7"), "203.0.113.7")
+        self.assertEqual(shield.client_key("2001:db8::1"), "2001:db8::/64")
+        self.assertEqual(shield.client_key("unknown"), "unknown")
+
+    def test_invalid_prefix(self):
+        with self.assertRaises(ValueError):
+            Shield(ipv6_prefix=0)
+
+
 class CleanupTests(unittest.TestCase):
     def test_stale_clients_are_dropped(self):
         shield = Shield(max_requests=5, window_seconds=10, cleanup_interval=60)

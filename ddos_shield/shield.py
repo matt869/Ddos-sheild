@@ -74,6 +74,7 @@ class Shield:
         alert_cooldown: float = 60.0,
         ban_multiplier: float = 1.0,
         max_ban_seconds: Optional[float] = None,
+        ipv6_prefix: int = 64,
     ) -> None:
         """``allowlist`` takes IPs or CIDR ranges (e.g. ``"10.0.0.0/8"``) that are
         never limited — health checks, internal networks, your load balancer.
@@ -88,7 +89,13 @@ class Shield:
 
         ``ban_multiplier`` > 1 makes repeat offenders' bans grow (see
         ``BlockList``), up to ``max_ban_seconds``.
+
+        IPv6 clients are grouped by their ``/ipv6_prefix`` network: one host
+        usually controls a whole /64 and can rotate through it freely. Use 128
+        to limit each IPv6 address separately.
         """
+        if not 0 < ipv6_prefix <= 128:
+            raise ValueError("ipv6_prefix must be between 1 and 128")
         if cleanup_interval <= 0:
             raise ValueError("cleanup_interval must be positive")
         if alert_cooldown < 0:
@@ -107,6 +114,7 @@ class Shield:
         self.allowlist = tuple(
             ipaddress.ip_network(entry, strict=False) for entry in allowlist
         )
+        self.ipv6_prefix = ipv6_prefix
         self.cleanup_interval = float(cleanup_interval)
         self._next_cleanup: float | None = None
         self.on_attack = on_attack
@@ -124,6 +132,20 @@ class Shield:
             return False
         return any(addr in net for net in self.allowlist)
 
+    def client_key(self, ip: str) -> str:
+        """The key a client is tracked under: its IPv4 address, or its IPv6
+        ``/ipv6_prefix`` network. Unparseable values are used as-is."""
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return ip
+        if isinstance(addr, ipaddress.IPv6Address):
+            if addr.ipv4_mapped is not None:
+                return str(addr.ipv4_mapped)
+            if self.ipv6_prefix < 128:
+                return str(ipaddress.ip_network(f"{addr}/{self.ipv6_prefix}", strict=False))
+        return str(addr)
+
     def check(self, ip: str, now: float | None = None) -> Decision:
         """Record a request from ``ip`` and decide whether to serve it."""
         now = time.monotonic() if now is None else now
@@ -135,19 +157,20 @@ class Shield:
             self._count("allowlisted")
             return ALLOW
 
-        if self.blocklist.is_banned(ip, now):
+        key = self.client_key(ip)
+        if self.blocklist.is_banned(key, now):
             self._count("blocked")
             return Decision(
                 allowed=False,
                 status=403,
                 error="forbidden",
                 reason="temporarily blocked",
-                retry_after=math.ceil(self.blocklist.time_remaining(ip, now)),
+                retry_after=math.ceil(self.blocklist.time_remaining(key, now)),
             )
 
-        if not self.limiter.allow(ip, now):
+        if not self.limiter.allow(key, now):
             # Over the limit -> ban, so further requests are rejected cheaply.
-            duration = self.blocklist.ban(ip, now)
+            duration = self.blocklist.ban(key, now)
             self._count("rate_limited")
             return Decision(
                 allowed=False,

@@ -20,6 +20,7 @@ _SECTIONS = {
     "blocklist": {"ban_seconds", "use_iptables", "ban_multiplier", "max_ban_seconds"},
     "monitor": {"spike_threshold", "sample_seconds", "alert_cooldown"},
     "maintenance": {"cleanup_interval"},
+    "clients": {"ipv6_prefix"},
 }
 
 
