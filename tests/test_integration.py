@@ -53,9 +53,10 @@ class LiveServer:
         self.server.server_close()
         self.thread.join(timeout=5)
 
-    def get(self, client):
-        """GET / as ``client``; returns (status, headers, body)."""
-        req = urllib.request.Request(self.url, headers={"X-Forwarded-For": client})
+    def get(self, client, path="/"):
+        """GET ``path`` as ``client``; returns (status, headers, body)."""
+        req = urllib.request.Request(self.url.rstrip("/") + path,
+                                     headers={"X-Forwarded-For": client})
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return resp.status, resp.headers, resp.read()
@@ -92,6 +93,36 @@ class LiveServerTests(unittest.TestCase):
         with LiveServer(max_requests=2, window_seconds=60,
                         allowlist=["10.0.0.0/8"]) as srv:
             self.assertEqual({srv.get("10.1.1.1")[0] for _ in range(20)}, {200})
+
+    def test_login_brute_force_blocked_but_site_still_usable(self):
+        with LiveServer(max_requests=100, path_limits={"/login": (3, 60)}) as srv:
+            attempts = [srv.get("198.51.100.5", "/login")[0] for _ in range(6)]
+            self.assertEqual(attempts, [200, 200, 200, 429, 429, 429])
+
+            status, headers, body = srv.get("198.51.100.5", "/login")
+            self.assertEqual(json.loads(body)["error"], "too_many_requests")
+            self.assertGreater(int(headers["Retry-After"]), 50)
+
+            self.assertEqual(srv.get("198.51.100.5", "/products")[0], 200)
+            self.assertEqual(srv.get("198.51.100.6", "/login")[0], 200)
+
+    def test_rotating_ipv6_attacker_is_caught(self):
+        with LiveServer(max_requests=5, window_seconds=60, ban_seconds=60) as srv:
+            codes = [srv.get(f"2001:db8:bad:1::{i:x}")[0] for i in range(1, 21)]
+            self.assertEqual(codes.count(200), 5)       # 20 addresses, one budget
+            # A different customer on another /64 is unaffected.
+            self.assertEqual(srv.get("2001:db8:900d:1::1")[0], 200)
+
+    def test_repeat_offender_gets_a_longer_ban(self):
+        with LiveServer(max_requests=1, ban_seconds=10, ban_multiplier=6) as srv:
+            srv.get("203.0.113.50")
+            self.assertEqual(srv.get("203.0.113.50")[1]["Retry-After"], "10")
+            # Simulate the first ban running out, then offend again.
+            shield = srv.app.shield
+            shield.blocklist.unban("203.0.113.50")
+            shield.limiter.reset("203.0.113.50")
+            srv.get("203.0.113.50")
+            self.assertEqual(srv.get("203.0.113.50")[1]["Retry-After"], "60")
 
     def test_spike_raises_alert(self):
         with LiveServer(max_requests=1000, spike_threshold=20, sample_seconds=5) as srv:
