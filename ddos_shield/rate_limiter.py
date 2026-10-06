@@ -65,6 +65,21 @@ class RateLimiter:
                 hits.popleft()
             return max(0, self.max_requests - len(hits))
 
+    def retry_after(self, key: str, now: float | None = None) -> float:
+        """Seconds until ``key`` may make another request (0.0 if it may now)."""
+        now = time.monotonic() if now is None else now
+        cutoff = now - self.window_seconds
+        with self._lock:
+            hits = self._hits.get(key)
+            if not hits:
+                return 0.0
+            while hits and hits[0] <= cutoff:
+                hits.popleft()
+            if len(hits) < self.max_requests:
+                return 0.0
+            # The oldest hit has to age out of the window first.
+            return hits[0] + self.window_seconds - now
+
     def tracked_clients(self) -> int:
         """Number of clients currently held in memory."""
         with self._lock:
