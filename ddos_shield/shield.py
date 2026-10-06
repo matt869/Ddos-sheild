@@ -72,6 +72,8 @@ class Shield:
         cleanup_interval: float = 60.0,
         on_attack: Optional[Callable[[float], None]] = None,
         alert_cooldown: float = 60.0,
+        ban_multiplier: float = 1.0,
+        max_ban_seconds: Optional[float] = None,
     ) -> None:
         """``allowlist`` takes IPs or CIDR ranges (e.g. ``"10.0.0.0/8"``) that are
         never limited — health checks, internal networks, your load balancer.
@@ -83,13 +85,21 @@ class Shield:
         ``on_attack(rate)`` is called when the global request rate crosses
         ``spike_threshold`` — page someone, tighten limits, scale up. It fires at
         most once per ``alert_cooldown`` seconds while the spike lasts.
+
+        ``ban_multiplier`` > 1 makes repeat offenders' bans grow (see
+        ``BlockList``), up to ``max_ban_seconds``.
         """
         if cleanup_interval <= 0:
             raise ValueError("cleanup_interval must be positive")
         if alert_cooldown < 0:
             raise ValueError("alert_cooldown must not be negative")
         self.limiter = RateLimiter(max_requests=max_requests, window_seconds=window_seconds)
-        self.blocklist = BlockList(ban_seconds=ban_seconds, use_iptables=use_iptables)
+        self.blocklist = BlockList(
+            ban_seconds=ban_seconds,
+            use_iptables=use_iptables,
+            ban_multiplier=ban_multiplier,
+            max_ban_seconds=max_ban_seconds,
+        )
         self.monitor = TrafficMonitor(
             spike_threshold=spike_threshold, sample_seconds=sample_seconds
         )
@@ -137,14 +147,14 @@ class Shield:
 
         if not self.limiter.allow(ip, now):
             # Over the limit -> ban, so further requests are rejected cheaply.
-            self.blocklist.ban(ip, now)
+            duration = self.blocklist.ban(ip, now)
             self._count("rate_limited")
             return Decision(
                 allowed=False,
                 status=429,
                 error="too_many_requests",
                 reason="rate limit exceeded",
-                retry_after=math.ceil(self.blocklist.ban_seconds),
+                retry_after=math.ceil(duration),
             )
 
         self._count("allowed")

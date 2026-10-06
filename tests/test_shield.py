@@ -76,6 +76,34 @@ class BlockListTests(unittest.TestCase):
         self.assertEqual(bl.banned(now=8), {"a": 2.0, "b": 7.0})
         self.assertEqual(bl.banned(now=12), {"b": 3.0})
 
+    def test_escalating_bans(self):
+        bl = BlockList(ban_seconds=10, ban_multiplier=2, max_ban_seconds=50,
+                       offense_memory=1000, use_iptables=False)
+        self.assertEqual(bl.ban("ip", now=0), 10)
+        self.assertEqual(bl.ban("ip", now=20), 20)
+        self.assertEqual(bl.ban("ip", now=60), 40)
+        self.assertEqual(bl.ban("ip", now=120), 50)   # capped
+        self.assertEqual(bl.offenses("ip", now=120), 4)
+
+    def test_offenses_forgotten_after_memory(self):
+        bl = BlockList(ban_seconds=10, ban_multiplier=2, offense_memory=100,
+                       use_iptables=False)
+        bl.ban("ip", now=0)
+        self.assertEqual(bl.ban("ip", now=500), 10)    # clean slate
+        bl.sweep(now=1000)
+        self.assertEqual(bl.offenses("ip", now=1000), 0)
+        self.assertEqual(bl._offenses, {})
+
+    def test_default_bans_do_not_escalate(self):
+        bl = BlockList(ban_seconds=10, use_iptables=False)
+        self.assertEqual([bl.ban("ip", now=t) for t in (0, 20, 40)], [10, 10, 10])
+
+    def test_invalid_escalation_settings(self):
+        with self.assertRaises(ValueError):
+            BlockList(ban_multiplier=0.5)
+        with self.assertRaises(ValueError):
+            BlockList(ban_seconds=60, max_ban_seconds=30)
+
     def test_unban(self):
         bl = BlockList(ban_seconds=10, use_iptables=False)
         bl.ban("ip", now=0)

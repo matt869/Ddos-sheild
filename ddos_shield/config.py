@@ -17,7 +17,7 @@ from typing import Any, Dict, Union
 # section -> keys allowed in it (all map straight onto Shield arguments)
 _SECTIONS = {
     "rate_limiter": {"max_requests", "window_seconds"},
-    "blocklist": {"ban_seconds", "use_iptables"},
+    "blocklist": {"ban_seconds", "use_iptables", "ban_multiplier", "max_ban_seconds"},
     "monitor": {"spike_threshold", "sample_seconds", "alert_cooldown"},
     "maintenance": {"cleanup_interval"},
 }

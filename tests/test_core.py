@@ -29,6 +29,15 @@ class ShieldTests(unittest.TestCase):
         shield.check("ip", now=0)  # banned
         self.assertTrue(shield.check("ip", now=31).allowed)
 
+    def test_repeat_offender_retry_after_grows(self):
+        shield = Shield(max_requests=1, window_seconds=10, ban_seconds=30,
+                        ban_multiplier=4, max_ban_seconds=3600)
+        shield.check("ip", now=0)
+        self.assertEqual(shield.check("ip", now=0).retry_after, 30)
+        shield.check("ip", now=100)                       # ban over, allowed again
+        self.assertEqual(shield.check("ip", now=100).retry_after, 120)
+        self.assertEqual(shield.check("ip", now=150).status, 403)
+
     def test_stats(self):
         shield = Shield(max_requests=2, window_seconds=10, ban_seconds=30,
                         spike_threshold=100, sample_seconds=1, allowlist=["10.0.0.1"])
