@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.0
+
+- Per-path limits (`path_limits`) for sensitive routes such as `/login`:
+  429 for that route only, with an exact `Retry-After`.
+- Escalating bans for repeat offenders (`ban_multiplier`, `max_ban_seconds`).
+- IPv6 clients are grouped by /64 (`ipv6_prefix`); IPv4-mapped addresses are
+  treated as IPv4.
+- `on_ban` hook, `RateLimiter.retry_after()` and `BlockList.offenses()`.
+- Prometheus exporter in `ddos_shield.metrics`, validated with the official
+  parser; the FastAPI example serves `/metrics`.
+- The simulation now includes a returning user, a password guesser and an
+  IPv6-rotating bot; live-server tests cover the same attacks.
+
 ## 1.3.0
 
 - New `ShieldASGIMiddleware` for FastAPI, Starlette, Quart and other ASGI apps,
