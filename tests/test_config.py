@@ -33,6 +33,25 @@ class ParseConfigTests(unittest.TestCase):
             parse_config({"rate_limiter": {"max_request": 5}})
         self.assertIn("max_request", str(ctx.exception))
 
+    def test_malformed_sections_rejected(self):
+        bad = [
+            ["not", "a", "mapping"],
+            {"path_limits": ["/login"]},
+            {"allowlist": "10.0.0.0/8"},
+            {"rate_limiter": 60},
+        ]
+        for data in bad:
+            with self.assertRaises(ValueError, msg=repr(data)):
+                parse_config(data)
+
+    def test_path_limits_and_modes(self):
+        options = parse_config({"path_limits": {"/login": {"max_requests": 5}},
+                                "mode": {"dry_run": True, "rate_limit_headers": True},
+                                "clients": {"ipv6_prefix": 56}})
+        self.assertEqual(options["path_limits"], {"/login": {"max_requests": 5}})
+        self.assertTrue(options["dry_run"])
+        Shield(**options)  # every key is a real Shield argument
+
     def test_unknown_section_rejected(self):
         with self.assertRaises(ValueError):
             parse_config({"firewall": {}})
