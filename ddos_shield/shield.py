@@ -231,7 +231,17 @@ class Shield:
 
         if not self.limiter.allow(key, now):
             # Over the limit -> ban, so further requests are rejected cheaply.
-            duration = self.blocklist.ban(key, now)
+            duration = self.blocklist.try_ban(key, now)
+            if duration is None:
+                # Another thread banned this client a moment ago.
+                self._count("blocked")
+                return Decision(
+                    allowed=False,
+                    status=403,
+                    error="forbidden",
+                    reason="temporarily blocked",
+                    retry_after=math.ceil(self.blocklist.time_remaining(key, now)),
+                )
             self._count("rate_limited")
             self._notify_ban(key, duration)
             return Decision(

@@ -55,8 +55,23 @@ class BlockList:
 
     def ban(self, ip: str, now: float | None = None) -> float:
         """Ban ``ip``; returns the ban length in seconds."""
+        duration = self._ban(ip, now, only_if_unbanned=False)
+        assert duration is not None
+        return duration
+
+    def try_ban(self, ip: str, now: float | None = None) -> Optional[float]:
+        """Ban ``ip`` unless it is already banned, as one atomic step.
+
+        Returns the ban length, or None if another thread banned it first —
+        so concurrent requests can't double-ban (and double-escalate) a client.
+        """
+        return self._ban(ip, now, only_if_unbanned=True)
+
+    def _ban(self, ip: str, now: float | None, only_if_unbanned: bool) -> Optional[float]:
         now = time.monotonic() if now is None else now
         with self._lock:
+            if only_if_unbanned and self._banned.get(ip, now) > now:
+                return None
             count, last = self._offenses.get(ip, (0, now))
             count = count + 1 if now - last < self.offense_memory else 1
             self._offenses[ip] = (count, now)

@@ -112,6 +112,13 @@ class BlockListTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             BlockList(ban_seconds=60, max_ban_seconds=30)
 
+    def test_try_ban_only_bans_once(self):
+        bl = BlockList(ban_seconds=10, ban_multiplier=2, use_iptables=False)
+        self.assertEqual(bl.try_ban("ip", now=0), 10)
+        self.assertIsNone(bl.try_ban("ip", now=5))      # still banned
+        self.assertEqual(bl.offenses("ip", now=5), 1)   # not escalated
+        self.assertEqual(bl.try_ban("ip", now=11), 20)  # expired -> new offense
+
     def test_unban(self):
         bl = BlockList(ban_seconds=10, use_iptables=False)
         bl.ban("ip", now=0)
