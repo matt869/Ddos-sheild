@@ -94,6 +94,12 @@ class ShieldASGIMiddlewareTests(unittest.TestCase):
         self.assertEqual(status_of(call(app, path="/login")), 429)
         self.assertEqual(status_of(call(app, path="/")), 200)
 
+    def test_forged_forwarded_for_cannot_rotate_identity(self):
+        app = ShieldASGIMiddleware(hello_app, trust_forwarded_for=True, max_requests=5)
+        codes = [status_of(call(app, ip="10.0.0.1", forwarded=f"1.2.3.{i}, 203.0.113.66"))
+                 for i in range(50)]
+        self.assertEqual(codes.count(200), 5)
+
     def test_missing_client_is_unknown(self):
         app = ShieldASGIMiddleware(hello_app, max_requests=1)
         self.assertEqual(app._client_ip({"type": "http"}), "unknown")

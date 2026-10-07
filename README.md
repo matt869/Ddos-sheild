@@ -179,7 +179,11 @@ application = ShieldMiddleware(
 ```
 
 Behind a reverse proxy you control, pass `trust_forwarded_for=True` so clients
-are identified by `X-Forwarded-For` instead of the proxy's address.
+are identified by `X-Forwarded-For` instead of the proxy's address. With more
+than one proxy in the chain (say a CDN plus a load balancer) pass the count,
+e.g. `trust_forwarded_for=2`. Only entries your own proxies appended are
+trusted; anything the client wrote into the header is ignored, so forged
+addresses can't be used to dodge limits.
 
 ---
 

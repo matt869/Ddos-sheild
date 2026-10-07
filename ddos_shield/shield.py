@@ -60,16 +60,30 @@ class Decision:
 ALLOW = Decision(allowed=True)
 
 
-def client_ip(headers: Any, remote_addr: str) -> str:
-    """Best-effort real client IP.
+def client_ip(headers: Any, remote_addr: str, trusted_proxies: int = 1) -> str:
+    """Real client IP behind ``trusted_proxies`` reverse proxies you control.
 
-    Honors the first hop in X-Forwarded-For *only* — trust this only if your
-    app sits behind a proxy you control, otherwise the header is spoofable.
+    Each proxy *appends* the address it received the request from to
+    X-Forwarded-For, so only the last ``trusted_proxies`` entries were written
+    by your infrastructure. Everything to their left came from the client and
+    can be forged — reading the first entry would let an attacker pick a new
+    identity for every request. If the header has fewer entries than expected,
+    the socket address is used.
     """
-    forwarded = headers.get("X-Forwarded-For", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    if trusted_proxies > 0:
+        forwarded = headers.get("X-Forwarded-For", "")
+        hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+        if len(hops) >= trusted_proxies:
+            return hops[-trusted_proxies]
     return remote_addr or "unknown"
+
+
+def proxy_count(trust_forwarded_for: Union[bool, int]) -> int:
+    """``trust_forwarded_for`` as a number of trusted proxies (True means 1)."""
+    count = int(trust_forwarded_for)
+    if count < 0:
+        raise ValueError("trust_forwarded_for must be a bool or a proxy count >= 0")
+    return count
 
 
 def normalize_path(path: str) -> str:

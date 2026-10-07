@@ -14,9 +14,23 @@ except ImportError:  # pragma: no cover
 
 
 class ClientIpTests(unittest.TestCase):
-    def test_uses_first_forwarded_hop(self):
-        headers = {"X-Forwarded-For": "198.51.100.1, 10.0.0.1"}
+    def test_uses_entry_written_by_our_proxy(self):
+        # Client forged "6.6.6.6"; our proxy appended the real address.
+        headers = {"X-Forwarded-For": "6.6.6.6, 198.51.100.1"}
         self.assertEqual(client_ip(headers, "10.0.0.2"), "198.51.100.1")
+
+    def test_two_proxies(self):
+        # CDN appended the client, then our load balancer appended the CDN.
+        headers = {"X-Forwarded-For": "6.6.6.6, 198.51.100.1, 172.16.0.9"}
+        self.assertEqual(client_ip(headers, "10.0.0.2", trusted_proxies=2), "198.51.100.1")
+
+    def test_too_few_entries_falls_back_to_socket(self):
+        headers = {"X-Forwarded-For": "198.51.100.1"}
+        self.assertEqual(client_ip(headers, "10.0.0.2", trusted_proxies=2), "10.0.0.2")
+
+    def test_zero_proxies_ignores_header(self):
+        headers = {"X-Forwarded-For": "198.51.100.1"}
+        self.assertEqual(client_ip(headers, "10.0.0.2", trusted_proxies=0), "10.0.0.2")
 
     def test_falls_back_to_remote_addr(self):
         self.assertEqual(client_ip({}, "203.0.113.7"), "203.0.113.7")

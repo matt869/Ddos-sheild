@@ -86,6 +86,20 @@ class ShieldMiddlewareTests(unittest.TestCase):
         self.assertTrue(get("/login").startswith("429"))
         self.assertEqual(get("/"), "200 OK")
 
+    def test_forged_forwarded_for_cannot_rotate_identity(self):
+        app = ShieldMiddleware(hello_app, trust_forwarded_for=True, max_requests=5)
+        codes = [call(app, ip="10.0.0.1", forwarded=f"1.2.3.{i}, 203.0.113.66")[0][:3]
+                 for i in range(50)]
+        self.assertEqual(codes.count("200"), 5)
+
+    def test_proxy_count(self):
+        app = ShieldMiddleware(hello_app, trust_forwarded_for=2, max_requests=1)
+        call(app, ip="10.0.0.1", forwarded="9.9.9.9, 198.51.100.1, 172.16.0.9")
+        status = call(app, ip="10.0.0.1", forwarded="8.8.8.8, 198.51.100.1, 172.16.0.9")[0]
+        self.assertTrue(status.startswith("429"))
+        with self.assertRaises(ValueError):
+            ShieldMiddleware(hello_app, trust_forwarded_for=-1)
+
     def test_accepts_existing_shield(self):
         shield = Shield(max_requests=1)
         app = ShieldMiddleware(hello_app, shield=shield)

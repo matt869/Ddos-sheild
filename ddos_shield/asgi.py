@@ -16,9 +16,9 @@ code 1008 (policy violation), which servers turn into an HTTP 403.
 from __future__ import annotations
 
 import json
-from typing import Any, Awaitable, Callable, Dict, Iterable, Optional
+from typing import Any, Awaitable, Callable, Dict, Iterable, Optional, Union
 
-from .shield import Shield, client_ip
+from .shield import Shield, client_ip, proxy_count
 
 __all__ = ["ShieldASGIMiddleware"]
 
@@ -32,19 +32,21 @@ class ShieldASGIMiddleware:
         self,
         app: Callable[[Scope, Receive, Send], Awaitable[None]],
         shield: Optional[Shield] = None,
-        trust_forwarded_for: bool = False,
+        trust_forwarded_for: Union[bool, int] = False,
         exempt_paths: Iterable[str] = (),
         **options: Any,
     ) -> None:
         """Pass a ready-made ``shield``, or ``Shield`` keyword ``options``.
 
         Requests to ``exempt_paths`` (e.g. ``"/health"``) are never checked.
+        ``trust_forwarded_for`` is the number of reverse proxies in front of
+        the app (``True`` = 1); see ``client_ip``.
         """
         if shield is not None and options:
             raise TypeError("pass either a Shield or Shield options, not both")
         self.app = app
         self.shield = shield if shield is not None else Shield(**options)
-        self.trust_forwarded_for = trust_forwarded_for
+        self.trusted_proxies = proxy_count(trust_forwarded_for)
         self.exempt_paths = frozenset(exempt_paths)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -76,11 +78,11 @@ class ShieldASGIMiddleware:
     def _client_ip(self, scope: Scope) -> str:
         client = scope.get("client")
         remote_addr = client[0] if client else ""
-        if not self.trust_forwarded_for:
+        if not self.trusted_proxies:
             return remote_addr or "unknown"
         forwarded = ""
         for name, value in scope.get("headers", []):
             if name == b"x-forwarded-for":
                 forwarded = value.decode("latin-1")
                 break
-        return client_ip({"X-Forwarded-For": forwarded}, remote_addr)
+        return client_ip({"X-Forwarded-For": forwarded}, remote_addr, self.trusted_proxies)

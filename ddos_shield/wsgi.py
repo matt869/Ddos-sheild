@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import json
 from http import HTTPStatus
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional, Union
 
-from .shield import Shield, client_ip
+from .shield import Shield, client_ip, proxy_count
 
 __all__ = ["ShieldMiddleware"]
 
@@ -26,19 +26,21 @@ class ShieldMiddleware:
         self,
         app: Callable[..., Iterable[bytes]],
         shield: Optional[Shield] = None,
-        trust_forwarded_for: bool = False,
+        trust_forwarded_for: Union[bool, int] = False,
         exempt_paths: Iterable[str] = (),
         **options: Any,
     ) -> None:
         """Pass a ready-made ``shield``, or ``Shield`` keyword ``options``.
 
         Requests to ``exempt_paths`` (e.g. ``"/health"``) are never checked.
+        ``trust_forwarded_for`` is the number of reverse proxies in front of
+        the app (``True`` = 1); see ``client_ip``.
         """
         if shield is not None and options:
             raise TypeError("pass either a Shield or Shield options, not both")
         self.app = app
         self.shield = shield if shield is not None else Shield(**options)
-        self.trust_forwarded_for = trust_forwarded_for
+        self.trusted_proxies = proxy_count(trust_forwarded_for)
         self.exempt_paths = frozenset(exempt_paths)
 
     def __call__(self, environ: dict, start_response: Callable) -> Iterable[bytes]:
@@ -46,11 +48,8 @@ class ShieldMiddleware:
             return self.app(environ, start_response)
 
         remote_addr = environ.get("REMOTE_ADDR", "")
-        if self.trust_forwarded_for:
-            headers = {"X-Forwarded-For": environ.get("HTTP_X_FORWARDED_FOR", "")}
-            ip = client_ip(headers, remote_addr)
-        else:
-            ip = remote_addr or "unknown"
+        headers = {"X-Forwarded-For": environ.get("HTTP_X_FORWARDED_FOR", "")}
+        ip = client_ip(headers, remote_addr, self.trusted_proxies)
 
         decision = self.shield.check(ip, path=environ.get("PATH_INFO", "/"))
         if decision.allowed:

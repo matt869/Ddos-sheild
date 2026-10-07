@@ -14,9 +14,9 @@ how long until the ban lifts.
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any, Iterable, Union
 
-from .shield import Shield, client_ip
+from .shield import Shield, client_ip, proxy_count
 
 __all__ = ["protect", "client_ip"]
 
@@ -29,7 +29,7 @@ def protect(
     use_iptables: bool = False,
     spike_threshold: float = 500.0,
     sample_seconds: float = 5.0,
-    trust_forwarded_for: bool = False,
+    trust_forwarded_for: Union[bool, int] = False,
     exempt_paths: Iterable[str] = (),
     **options: Any,
 ) -> Shield:
@@ -37,6 +37,8 @@ def protect(
 
     Requests to ``exempt_paths`` (e.g. ``"/health"``) are never checked or
     counted. Extra keyword ``options`` (e.g. ``allowlist``) go to ``Shield``.
+    ``trust_forwarded_for`` is the number of reverse proxies in front of the
+    app (``True`` = 1); see ``client_ip``.
     """
     from flask import jsonify, request  # imported lazily so Flask stays optional
 
@@ -51,6 +53,7 @@ def protect(
     )
 
     exempt = frozenset(exempt_paths)
+    trusted_proxies = proxy_count(trust_forwarded_for)
 
     # Expose components for tests / advanced tuning.
     app.extensions = getattr(app, "extensions", {})
@@ -66,11 +69,7 @@ def protect(
         if request.path in exempt:
             return None
 
-        ip = (
-            client_ip(request.headers, request.remote_addr)
-            if trust_forwarded_for
-            else (request.remote_addr or "unknown")
-        )
+        ip = client_ip(request.headers, request.remote_addr, trusted_proxies)
 
         decision = shield.check(ip, path=request.path)
         if decision.allowed:
