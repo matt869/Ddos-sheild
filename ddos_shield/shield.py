@@ -27,6 +27,14 @@ from .rate_limiter import RateLimiter
 logger = logging.getLogger("ddos_shield")
 
 PathLimit = Union[Tuple[int, float], Mapping[str, float]]
+IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+
+
+def _parse_ip(ip: str) -> Optional[IPAddress]:
+    try:
+        return ipaddress.ip_address(ip)
+    except ValueError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -139,6 +147,7 @@ class Shield:
             ipaddress.ip_network(entry, strict=False) for entry in allowlist
         )
         self.ipv6_prefix = ipv6_prefix
+        self._ipv6_mask = ((1 << ipv6_prefix) - 1) << (128 - ipv6_prefix)
         self.path_limiters: Dict[str, RateLimiter] = {
             normalize_path(path): _path_limiter(path, rule)
             for path, rule in (path_limits or {}).items()
@@ -159,27 +168,31 @@ class Shield:
         }
 
     def is_allowlisted(self, ip: str) -> bool:
-        if not self.allowlist:
-            return False
-        try:
-            addr = ipaddress.ip_address(ip)
-        except ValueError:
-            return False
-        return any(addr in net for net in self.allowlist)
+        return self._allowlisted(_parse_ip(ip))
 
     def client_key(self, ip: str) -> str:
         """The key a client is tracked under: its IPv4 address, or its IPv6
         ``/ipv6_prefix`` network. Unparseable values are used as-is."""
-        try:
-            addr = ipaddress.ip_address(ip)
-        except ValueError:
+        return self._key(ip, _parse_ip(ip))
+
+    def _allowlisted(self, addr: Optional[IPAddress]) -> bool:
+        if addr is None or not self.allowlist:
+            return False
+        return any(addr in net for net in self.allowlist)
+
+    def _key(self, ip: str, addr: Optional[IPAddress]) -> str:
+        if addr is None:
             return ip
-        if isinstance(addr, ipaddress.IPv6Address):
-            if addr.ipv4_mapped is not None:
-                return str(addr.ipv4_mapped)
+        if addr.version == 6:
+            mapped = addr.ipv4_mapped  # type: ignore[union-attr]
+            if mapped is not None:
+                return str(mapped)
             if self.ipv6_prefix < 128:
-                return str(ipaddress.ip_network(f"{addr}/{self.ipv6_prefix}", strict=False))
-        return str(addr)
+                # Integer masking: far cheaper than building an ip_network.
+                network = ipaddress.IPv6Address(int(addr) & self._ipv6_mask)
+                return f"{network}/{self.ipv6_prefix}"
+            return str(addr)
+        return ip  # IPv4 parsing is strict, so the input is already canonical
 
     def path_limiter(self, path: str) -> Optional[RateLimiter]:
         """The limiter for the most specific ``path_limits`` rule covering ``path``."""
@@ -200,11 +213,12 @@ class Shield:
         self._maybe_cleanup(now)
         self._maybe_alert(now)
 
-        if self.is_allowlisted(ip):
+        addr = _parse_ip(ip)
+        if self._allowlisted(addr):
             self._count("allowlisted")
             return ALLOW
 
-        key = self.client_key(ip)
+        key = self._key(ip, addr)
         if self.blocklist.is_banned(key, now):
             self._count("blocked")
             return Decision(
