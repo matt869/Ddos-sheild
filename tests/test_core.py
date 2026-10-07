@@ -138,6 +138,17 @@ class PathLimitTests(unittest.TestCase):
         self.assertIsNone(shield.path_limiter("/loginhelp"))
         self.assertIsNone(shield.path_limiter("/"))
 
+    def test_path_tricks_cannot_bypass_login_limit(self):
+        shield = self.make()
+        variants = ["/login", "//login", "/./login", "/x/../login", "/login/",
+                    "/../login", "///login//"]
+        codes = [shield.check("ip", now=0, path=p).status for p in variants]
+        self.assertEqual(codes, [200, 200, 200, 429, 429, 429, 429])
+
+    def test_rule_spelling_is_normalized_too(self):
+        shield = Shield(path_limits={"//admin/": (1, 60)})
+        self.assertIsNotNone(shield.path_limiter("/admin/users"))
+
     def test_longest_rule_wins(self):
         shield = Shield(path_limits={"/api": (100, 60), "/api/upload": (1, 60)})
         self.assertEqual(shield.path_limiter("/api/upload/x").max_requests, 1)

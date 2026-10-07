@@ -14,6 +14,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import math
+import posixpath
 import threading
 import time
 from dataclasses import dataclass
@@ -59,6 +60,16 @@ def client_ip(headers: Any, remote_addr: str) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return remote_addr or "unknown"
+
+
+def normalize_path(path: str) -> str:
+    """Canonical form of a URL path for rule matching.
+
+    Collapses repeated slashes and resolves ``.``/``..`` segments, so
+    ``//login``, ``/./login`` and ``/x/../login`` can't slip past a ``/login``
+    rule when the app or server would route them to the same place.
+    """
+    return posixpath.normpath("/" + path.lstrip("/"))
 
 
 class Shield:
@@ -129,7 +140,7 @@ class Shield:
         )
         self.ipv6_prefix = ipv6_prefix
         self.path_limiters: Dict[str, RateLimiter] = {
-            path.rstrip("/") or "/": _path_limiter(path, rule)
+            normalize_path(path): _path_limiter(path, rule)
             for path, rule in (path_limits or {}).items()
         }
         self.on_ban = on_ban
@@ -172,6 +183,7 @@ class Shield:
 
     def path_limiter(self, path: str) -> Optional[RateLimiter]:
         """The limiter for the most specific ``path_limits`` rule covering ``path``."""
+        path = normalize_path(path)
         best = None
         for rule in self.path_limiters:
             if rule == "/" or path == rule or path.startswith(rule + "/"):
