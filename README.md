@@ -37,6 +37,12 @@ sudden traffic spikes, and (optionally) auto-blocking offenders at the firewall.
 - **IPv6-aware** — clients are grouped by /64, so a bot rotating through its
   IPv6 block can't get a fresh budget per address.
 - **Ban events** — an `on_ban` hook for your logs, SIEM or chat.
+- **Dry-run mode** — log and count who *would* be blocked without blocking
+  anyone, so you can tune limits on real traffic before enforcing them.
+- **Survives restarts** — save and restore bans so a redeploy doesn't hand
+  every attacker a clean slate.
+- **Fast and thread-safe** — ~5 µs per request on IPv4, stress-tested with
+  16 threads hammering one shield.
 - **YAML config** — load all settings from a config file.
 - **Zero heavy dependencies** — pure standard library at its core.
 
@@ -131,6 +137,30 @@ shield = Shield(
   a password can still browse.
 - **`ban_multiplier`** applies to bans within an hour of the previous one;
   offense history is forgotten after that.
+- Paths are normalized before matching, so `//login`, `/./login` or
+  `/x/../login` can't sneak past a `/login` rule.
+
+### Rolling out safely
+
+```python
+shield = Shield(max_requests=60, window_seconds=60, dry_run=True)
+```
+
+Nothing is rejected, but every would-be rejection is logged
+(`dry run: would reject 203.0.113.7 on /login with 429 ...`) and counted in
+`shield.stats()`. When the numbers look right, drop `dry_run`.
+
+### Keeping bans across restarts
+
+```python
+import atexit
+
+shield.load_state("/var/lib/myapp/shield.json")      # on startup
+atexit.register(shield.save_state, "/var/lib/myapp/shield.json")
+```
+
+Bans and offense history are stored with wall-clock expiry times and written
+atomically; expired entries are skipped on load.
 
 ---
 
@@ -277,13 +307,31 @@ config.yaml: OK
 
 ---
 
+## Performance
+
+`python examples/benchmark.py` times `Shield.check`, the work every protected
+request does:
+
+```
+scenario                                            checks   per check
+----------------------------------------------------------------------
+defaults, 5,000 IPv4 clients                     206,000/s     4.84 us
+defaults, 5,000 IPv6 clients                      69,000/s    14.49 us
+allowlist of 3 networks                          150,000/s     6.68 us
+```
+
+(Single core, CPython 3.11; your numbers will differ.)
+
+---
+
 ## Running tests
 
 ```bash
 python -m unittest -v
 ```
 
-Includes end-to-end tests that run a real HTTP server on `127.0.0.1`. The
+Includes end-to-end tests that run a real HTTP server on `127.0.0.1`, and
+multi-threaded stress tests that force rapid thread switching to expose races. The
 Flask and YAML tests are skipped unless those packages are installed
 (`pip install -r requirements.txt`).
 

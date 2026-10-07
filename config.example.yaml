@@ -24,6 +24,10 @@ path_limits:
     max_requests: 5     # login attempts...
     window_seconds: 60  # ...per minute per client
 
+# Log and count would-be rejections without rejecting anything.
+mode:
+  dry_run: false
+
 # Never rate-limited: health checks, internal networks, your load balancer.
 allowlist:
   - 127.0.0.1
