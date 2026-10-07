@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.5.0
+
+- Security: paths are normalized before matching `path_limits`, closing a
+  bypass where `//login`, `/./login` or `/x/../login` skipped a `/login` limit.
+- Fix: concurrent requests could ban a client twice in one burst, which with
+  `ban_multiplier` doubled a first offender's ban. Bans are now atomic
+  (`BlockList.try_ban`).
+- Dry-run mode (`dry_run=True`) for safe rollouts.
+- `save_state()` / `load_state()` keep bans and offense history across restarts.
+- Faster: each address is parsed once and IPv6 keys use integer masking —
+  IPv4 checks ~20% faster, IPv6 ~2x faster. `examples/benchmark.py` added.
+- Multi-threaded stress tests for the Shield core.
+
 ## 1.4.0
 
 - Per-path limits (`path_limits`) for sensitive routes such as `/login`:
