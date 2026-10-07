@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import threading
 import time
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger("ddos_shield.blocklist")
 
@@ -151,6 +151,46 @@ class BlockList:
             for ip in expired:
                 self._iptables("-D", ip)
         return len(expired)
+
+    def export_state(self, now: float | None = None,
+                     wall: float | None = None) -> Dict[str, Any]:
+        """Active bans and offense history, with times as Unix timestamps.
+
+        Monotonic clocks restart with the process, so the snapshot uses
+        wall-clock time; ``import_state`` converts back.
+        """
+        now = time.monotonic() if now is None else now
+        wall = time.time() if wall is None else wall
+        with self._lock:
+            bans = {ip: wall + (expiry - now)
+                    for ip, expiry in self._banned.items() if expiry > now}
+            offenses = {ip: [count, wall + (last - now)]
+                        for ip, (count, last) in self._offenses.items()
+                        if now - last < self.offense_memory}
+        return {"bans": bans, "offenses": offenses}
+
+    def import_state(self, state: Dict[str, Any], now: float | None = None,
+                     wall: float | None = None) -> int:
+        """Restore a snapshot from ``export_state``; expired entries are
+        skipped. Returns the number of bans restored."""
+        now = time.monotonic() if now is None else now
+        wall = time.time() if wall is None else wall
+        restored = []
+        with self._lock:
+            for ip, last_wall in state.get("offenses", {}).items():
+                count, last = int(last_wall[0]), now + (float(last_wall[1]) - wall)
+                if now - last < self.offense_memory:
+                    self._offenses[ip] = (count, last)
+            for ip, expiry_wall in state.get("bans", {}).items():
+                expiry = now + (float(expiry_wall) - wall)
+                if expiry > now and self._banned.get(ip, 0) < expiry:
+                    if ip not in self._banned:
+                        restored.append(ip)
+                    self._banned[ip] = expiry
+        if self.use_iptables:
+            for ip in restored:
+                self._iptables("-A", ip)
+        return len(restored)
 
     def _iptables(self, action: str, ip: str) -> None:
         """Add (-A) or delete (-D) a DROP rule for ``ip``. Best-effort."""

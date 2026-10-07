@@ -119,6 +119,27 @@ class BlockListTests(unittest.TestCase):
         self.assertEqual(bl.offenses("ip", now=5), 1)   # not escalated
         self.assertEqual(bl.try_ban("ip", now=11), 20)  # expired -> new offense
 
+    def test_export_import_round_trip(self):
+        old = BlockList(ban_seconds=100, ban_multiplier=2, use_iptables=False)
+        old.ban("a", now=0)
+        old.ban("b", now=0)
+        old.ban("b", now=0)                     # second offense: 200s
+        state = old.export_state(now=50, wall=1_000_000)
+        self.assertEqual(state["bans"], {"a": 1_000_050.0, "b": 1_000_150.0})
+
+        # New process: different monotonic clock, 20s of wall time later.
+        new = BlockList(ban_seconds=100, ban_multiplier=2, use_iptables=False)
+        self.assertEqual(new.import_state(state, now=7, wall=1_000_020), 2)
+        self.assertEqual(new.time_remaining("a", now=7), 30)
+        self.assertEqual(new.time_remaining("b", now=7), 130)
+        self.assertEqual(new.offenses("b", now=7), 2)   # escalation remembered
+
+    def test_import_skips_expired(self):
+        bl = BlockList(use_iptables=False)
+        state = {"bans": {"old": 900.0, "live": 1100.0}, "offenses": {}}
+        self.assertEqual(bl.import_state(state, now=0, wall=1000), 1)
+        self.assertEqual(list(bl.banned(now=0)), ["live"])
+
     def test_unban(self):
         bl = BlockList(ban_seconds=10, use_iptables=False)
         bl.ban("ip", now=0)

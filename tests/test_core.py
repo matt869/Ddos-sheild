@@ -1,6 +1,8 @@
 """Tests for the framework-independent Shield core."""
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from ddos_shield.shield import Shield
 
@@ -186,6 +188,34 @@ class DryRunTests(unittest.TestCase):
     def test_cannot_combine_with_iptables(self):
         with self.assertRaises(ValueError):
             Shield(dry_run=True, use_iptables=True)
+
+
+class PersistenceTests(unittest.TestCase):
+    def test_bans_survive_a_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "shield-state.json"
+            before = Shield(max_requests=1, ban_seconds=600)
+            before.check("203.0.113.66")
+            self.assertEqual(before.check("203.0.113.66").status, 429)
+            before.save_state(path)
+            self.assertFalse(Path(f"{path}.tmp").exists())
+
+            after = Shield(max_requests=1, ban_seconds=600)   # "restarted" process
+            self.assertEqual(after.load_state(path), 1)
+            decision = after.check("203.0.113.66")
+            self.assertEqual(decision.status, 403)
+            self.assertGreater(decision.retry_after, 590)
+            self.assertTrue(after.check("198.51.100.1").allowed)
+
+    def test_missing_file_is_fine(self):
+        self.assertEqual(Shield().load_state("no-such-state.json"), 0)
+
+    def test_unknown_version_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.json"
+            path.write_text('{"version": 99, "bans": {}}', encoding="utf-8")
+            with self.assertRaises(ValueError):
+                Shield().load_state(path)
 
 
 class OnBanTests(unittest.TestCase):

@@ -12,8 +12,10 @@ one question per request: let it through, or reject it (and how)?
 from __future__ import annotations
 
 import ipaddress
+import json
 import logging
 import math
+import os
 import posixpath
 import threading
 import time
@@ -301,6 +303,32 @@ class Shield:
             "tracked_clients": self.limiter.tracked_clients(),
             "dry_run": self.dry_run,
         }
+
+    def save_state(self, path: Union[str, "os.PathLike[str]"]) -> None:
+        """Write active bans and offense history to ``path`` (JSON), atomically.
+
+        Call it on shutdown (and periodically) so a restart or redeploy
+        doesn't hand every banned attacker a clean slate.
+        """
+        state = {"version": 1, **self.blocklist.export_state()}
+        tmp = f"{os.fspath(path)}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(state, fh)
+        os.replace(tmp, path)  # readers never see a half-written file
+
+    def load_state(self, path: Union[str, "os.PathLike[str]"]) -> int:
+        """Restore bans saved by ``save_state``. Returns how many were restored;
+        a missing file restores nothing."""
+        try:
+            with open(path, encoding="utf-8") as fh:
+                state = json.load(fh)
+        except FileNotFoundError:
+            return 0
+        if state.get("version") != 1:
+            raise ValueError(f"unsupported state file version: {state.get('version')!r}")
+        restored = self.blocklist.import_state(state)
+        logger.info("Restored %d bans from %s", restored, path)
+        return restored
 
     def _notify_ban(self, key: str, duration: float) -> None:
         if self.on_ban is None:
