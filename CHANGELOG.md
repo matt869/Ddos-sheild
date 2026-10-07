@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.0
+
+- Security: `X-Forwarded-For` was read from the left, which the client
+  controls, so anyone behind a proxy could forge a new address per request and
+  bypass every limit. Only entries appended by your own proxies are trusted
+  now; `trust_forwarded_for` also accepts a proxy count (e.g. `2` for a CDN
+  plus a load balancer).
+- Optional `RateLimit-Limit/Remaining/Reset` headers (`rate_limit_headers=True`)
+  in Flask, WSGI and ASGI; new `RateLimiter.status()`.
+- iptables enforcement is now tested command by command (mocked).
+- Coverage is 99%; CI enforces at least 95% and runs on Python 3.9-3.13.
+
 ## 1.5.0
 
 - Security: paths are normalized before matching `path_limits`, closing a
