@@ -12,3 +12,4 @@ config.yaml
 htmlcov/
 build/
 dist/
+.coverage.*

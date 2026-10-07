@@ -20,13 +20,16 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9", "3.11", "3.13"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -r requirements.txt
-      - run: python -m unittest -v
+      - run: pip install -r requirements.txt coverage
+      - name: Tests with coverage (fails under 95%)
+        run: |
+          coverage run -m unittest -v
+          coverage report
       - name: Traffic simulation smoke test
         run: python examples/simulate.py
