@@ -19,8 +19,8 @@ import os
 import posixpath
 import threading
 import time
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple, Union
+from dataclasses import dataclass, replace
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple, Union
 
 from .blocklist import BlockList
 from .monitor import TrafficMonitor
@@ -48,6 +48,24 @@ class Decision:
     error: str = ""
     reason: str = ""
     retry_after: int = 0
+    # Quota for RateLimit-* headers; None unless rate_limit_headers is on.
+    limit: Optional[int] = None
+    remaining: Optional[int] = None
+    reset: Optional[int] = None
+
+    def headers(self) -> List[Tuple[str, str]]:
+        """Response headers: ``Retry-After`` on rejections, plus the
+        ``RateLimit-Limit/Remaining/Reset`` trio when quota info is attached."""
+        headers = []
+        if not self.allowed:
+            headers.append(("Retry-After", str(self.retry_after)))
+        if self.limit is not None:
+            headers += [
+                ("RateLimit-Limit", str(self.limit)),
+                ("RateLimit-Remaining", str(self.remaining)),
+                ("RateLimit-Reset", str(self.reset)),
+            ]
+        return headers
 
     def payload(self) -> Dict[str, str]:
         """JSON body for a rejected request."""
@@ -115,6 +133,7 @@ class Shield:
         path_limits: Optional[Mapping[str, PathLimit]] = None,
         on_ban: Optional[Callable[[str, float], None]] = None,
         dry_run: bool = False,
+        rate_limit_headers: bool = False,
     ) -> None:
         """``allowlist`` takes IPs or CIDR ranges (e.g. ``"10.0.0.0/8"``) that are
         never limited — health checks, internal networks, your load balancer.
@@ -146,6 +165,11 @@ class Shield:
         ``dry_run=True`` lets every request through but still logs, counts and
         records who *would* have been rejected — roll out on real traffic,
         tune the limits from ``stats()``, then switch enforcement on.
+
+        ``rate_limit_headers=True`` attaches the client's quota to every
+        decision so the integrations can send ``RateLimit-Limit``,
+        ``RateLimit-Remaining`` and ``RateLimit-Reset`` (IETF draft) headers,
+        letting well-behaved clients slow down before they hit the limit.
         """
         if dry_run and use_iptables:
             raise ValueError("dry_run can't be combined with use_iptables")
@@ -177,6 +201,7 @@ class Shield:
         }
         self.on_ban = on_ban
         self.dry_run = dry_run
+        self.rate_limit_headers = rate_limit_headers
         self.cleanup_interval = float(cleanup_interval)
         self._next_cleanup: float | None = None
         self.on_attack = on_attack
@@ -252,15 +277,16 @@ class Shield:
             return ALLOW
 
         key = self._key(ip, addr)
+        limiter = self.path_limiter(path) if path is not None else None
         if self.blocklist.is_banned(key, now):
             self._count("blocked")
-            return Decision(
+            return self._quota(Decision(
                 allowed=False,
                 status=403,
                 error="forbidden",
                 reason="temporarily blocked",
                 retry_after=math.ceil(self.blocklist.time_remaining(key, now)),
-            )
+            ), key, limiter, now)
 
         if not self.limiter.allow(key, now):
             # Over the limit -> ban, so further requests are rejected cheaply.
@@ -277,27 +303,39 @@ class Shield:
                 )
             self._count("rate_limited")
             self._notify_ban(key, duration)
-            return Decision(
+            return self._quota(Decision(
                 allowed=False,
                 status=429,
                 error="too_many_requests",
                 reason="rate limit exceeded",
                 retry_after=math.ceil(duration),
-            )
+            ), key, None, now)
 
-        limiter = self.path_limiter(path) if path is not None else None
         if limiter is not None and not limiter.allow(key, now):
             self._count("path_limited")
-            return Decision(
+            return self._quota(Decision(
                 allowed=False,
                 status=429,
                 error="too_many_requests",
                 reason="rate limit exceeded for this path",
                 retry_after=max(1, math.ceil(limiter.retry_after(key, now))),
-            )
+            ), key, limiter, now)
 
         self._count("allowed")
-        return ALLOW
+        return self._quota(ALLOW, key, limiter, now)
+
+    def _quota(self, decision: Decision, key: str, limiter: Optional[RateLimiter],
+               now: float) -> Decision:
+        """Attach RateLimit-* quota info if enabled. A path rule, when one
+        applies, is the stricter and more relevant budget to report."""
+        if not self.rate_limit_headers:
+            return decision
+        limiter = limiter or self.limiter
+        remaining, reset = limiter.status(key, now)
+        if not decision.allowed:
+            remaining, reset = 0, decision.retry_after
+        return replace(decision, limit=limiter.max_requests, remaining=remaining,
+                       reset=math.ceil(reset))
 
     def stats(self, now: float | None = None) -> Dict[str, Any]:
         """Snapshot for dashboards and metrics exporters.

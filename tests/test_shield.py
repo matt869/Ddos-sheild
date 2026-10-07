@@ -41,6 +41,15 @@ class RateLimiterTests(unittest.TestCase):
         self.assertEqual(rl.retry_after("ip", now=6), 4.0)   # hit at 0 frees at 10
         self.assertEqual(rl.retry_after("ip", now=10), 0.0)
 
+    def test_status(self):
+        rl = RateLimiter(max_requests=3, window_seconds=10)
+        self.assertEqual(rl.status("ip", now=0), (3, 0.0))
+        rl.allow("ip", now=2)
+        rl.allow("ip", now=5)
+        self.assertEqual(rl.status("ip", now=6), (1, 6.0))   # hit at 2 frees at 12
+        self.assertEqual(rl.status("ip", now=20), (3, 0.0))
+        self.assertEqual(rl.tracked_clients(), 1)
+
     def test_prune_removes_stale_clients(self):
         rl = RateLimiter(max_requests=5, window_seconds=10)
         rl.allow("gone", now=0)

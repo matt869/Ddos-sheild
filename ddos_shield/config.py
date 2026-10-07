@@ -21,7 +21,7 @@ _SECTIONS = {
     "monitor": {"spike_threshold", "sample_seconds", "alert_cooldown"},
     "maintenance": {"cleanup_interval"},
     "clients": {"ipv6_prefix"},
-    "mode": {"dry_run"},
+    "mode": {"dry_run", "rate_limit_headers"},
 }
 
 

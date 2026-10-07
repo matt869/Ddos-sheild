@@ -100,6 +100,17 @@ class ShieldMiddlewareTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ShieldMiddleware(hello_app, trust_forwarded_for=-1)
 
+    def test_rate_limit_headers(self):
+        app = ShieldMiddleware(hello_app, max_requests=2, rate_limit_headers=True)
+        status, headers, body = call(app)
+        self.assertEqual((status, body), ("200 OK", b"hello"))
+        self.assertEqual(headers["Content-Type"], "text/plain")   # app's own headers kept
+        self.assertEqual(headers["RateLimit-Remaining"], "1")
+        call(app)
+        status, headers, _ = call(app)
+        self.assertTrue(status.startswith("429"))
+        self.assertEqual(headers["RateLimit-Remaining"], "0")
+
     def test_accepts_existing_shield(self):
         shield = Shield(max_requests=1)
         app = ShieldMiddleware(hello_app, shield=shield)

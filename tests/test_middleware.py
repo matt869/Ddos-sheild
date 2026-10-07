@@ -103,6 +103,16 @@ class ProtectTests(unittest.TestCase):
         self.assertEqual(codes, [200, 200, 429])
         self.assertEqual(client.get("/").status_code, 200)
 
+    def test_rate_limit_headers(self):
+        client = self.make_client(max_requests=2, rate_limit_headers=True)
+        resp = client.get("/")
+        self.assertEqual(resp.headers["RateLimit-Limit"], "2")
+        self.assertEqual(resp.headers["RateLimit-Remaining"], "1")
+        client.get("/")
+        resp = client.get("/")
+        self.assertEqual(resp.status_code, 429)
+        self.assertEqual(resp.headers["RateLimit-Remaining"], "0")
+
     def test_allowlist_option(self):
         client = self.make_client(max_requests=1, window_seconds=10, allowlist=["127.0.0.1"])
         codes = {client.get("/").status_code for _ in range(5)}

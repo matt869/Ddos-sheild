@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import defaultdict, deque
-from typing import Deque, Dict
+from typing import Deque, Dict, Tuple
 
 
 class RateLimiter:
@@ -79,6 +79,21 @@ class RateLimiter:
                 return 0.0
             # The oldest hit has to age out of the window first.
             return hits[0] + self.window_seconds - now
+
+    def status(self, key: str, now: float | None = None) -> Tuple[int, float]:
+        """``(remaining, reset)``: requests ``key`` has left in the window, and
+        seconds until its oldest counted request ages out (0.0 if none)."""
+        now = time.monotonic() if now is None else now
+        cutoff = now - self.window_seconds
+        with self._lock:
+            hits = self._hits.get(key)
+            if not hits:
+                return self.max_requests, 0.0
+            while hits and hits[0] <= cutoff:
+                hits.popleft()
+            if not hits:
+                return self.max_requests, 0.0
+            return max(0, self.max_requests - len(hits)), hits[0] + self.window_seconds - now
 
     def tracked_clients(self) -> int:
         """Number of clients currently held in memory."""

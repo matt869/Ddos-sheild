@@ -53,7 +53,15 @@ class ShieldMiddleware:
 
         decision = self.shield.check(ip, path=environ.get("PATH_INFO", "/"))
         if decision.allowed:
-            return self.app(environ, start_response)
+            extra = decision.headers()
+            if not extra:
+                return self.app(environ, start_response)
+
+            def start_with_quota(status, headers, *exc_info):
+                # Forward exc_info only if the app passed it (it's optional).
+                return start_response(status, list(headers) + extra, *exc_info)
+
+            return self.app(environ, start_with_quota)
 
         body = json.dumps(decision.payload()).encode("utf-8")
         status = HTTPStatus(decision.status)
@@ -62,7 +70,7 @@ class ShieldMiddleware:
             [
                 ("Content-Type", "application/json"),
                 ("Content-Length", str(len(body))),
-                ("Retry-After", str(decision.retry_after)),
+                *decision.headers(),
             ],
         )
         return [body]

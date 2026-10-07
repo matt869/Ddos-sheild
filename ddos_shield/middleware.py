@@ -40,7 +40,7 @@ def protect(
     ``trust_forwarded_for`` is the number of reverse proxies in front of the
     app (``True`` = 1); see ``client_ip``.
     """
-    from flask import jsonify, request  # imported lazily so Flask stays optional
+    from flask import g, jsonify, request  # imported lazily so Flask stays optional
 
     shield = Shield(
         max_requests=max_requests,
@@ -73,11 +73,19 @@ def protect(
 
         decision = shield.check(ip, path=request.path)
         if decision.allowed:
+            g.ddos_shield_decision = decision  # headers added in _add_headers
             return None  # let the request through
 
         resp = jsonify(decision.payload())
         resp.status_code = decision.status
-        resp.headers["Retry-After"] = str(decision.retry_after)
+        resp.headers.update(decision.headers())
+        return resp
+
+    @app.after_request
+    def _add_headers(resp):
+        decision = g.pop("ddos_shield_decision", None)
+        if decision is not None:
+            resp.headers.update(decision.headers())
         return resp
 
     return shield

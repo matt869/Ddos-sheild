@@ -59,7 +59,17 @@ class ShieldASGIMiddleware:
 
         decision = self.shield.check(self._client_ip(scope), path=scope.get("path", "/"))
         if decision.allowed:
-            await self.app(scope, receive, send)
+            extra = [(k.lower().encode(), v.encode()) for k, v in decision.headers()]
+            if not extra or scope["type"] != "http":
+                await self.app(scope, receive, send)
+                return
+
+            async def send_with_quota(message: Dict[str, Any]) -> None:
+                if message["type"] == "http.response.start":
+                    message = {**message, "headers": [*message.get("headers", []), *extra]}
+                await send(message)
+
+            await self.app(scope, receive, send_with_quota)
         elif scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 1008})
         else:
@@ -70,7 +80,7 @@ class ShieldASGIMiddleware:
                 "headers": [
                     (b"content-type", b"application/json"),
                     (b"content-length", str(len(body)).encode()),
-                    (b"retry-after", str(decision.retry_after).encode()),
+                    *[(k.lower().encode(), v.encode()) for k, v in decision.headers()],
                 ],
             })
             await send({"type": "http.response.body", "body": body})

@@ -100,6 +100,14 @@ class ShieldASGIMiddlewareTests(unittest.TestCase):
                  for i in range(50)]
         self.assertEqual(codes.count(200), 5)
 
+    def test_rate_limit_headers(self):
+        app = ShieldASGIMiddleware(hello_app, max_requests=2, rate_limit_headers=True)
+        start = call(app)[0]
+        headers = dict(start["headers"])
+        self.assertEqual(headers[b"content-type"], b"text/plain")
+        self.assertEqual(headers[b"ratelimit-limit"], b"2")
+        self.assertEqual(headers[b"ratelimit-remaining"], b"1")
+
     def test_missing_client_is_unknown(self):
         app = ShieldASGIMiddleware(hello_app, max_requests=1)
         self.assertEqual(app._client_ip({"type": "http"}), "unknown")

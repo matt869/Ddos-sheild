@@ -167,6 +167,35 @@ class PathLimitTests(unittest.TestCase):
         self.assertEqual(shield.stats(now=4)["requests"]["path_limited"], 1)
 
 
+class RateLimitHeaderTests(unittest.TestCase):
+    def test_off_by_default(self):
+        self.assertEqual(Shield().check("ip", now=0).headers(), [])
+
+    def test_quota_counts_down(self):
+        shield = Shield(max_requests=3, window_seconds=60, rate_limit_headers=True)
+        first = shield.check("ip", now=0)
+        self.assertEqual((first.limit, first.remaining, first.reset), (3, 2, 60))
+        third = [shield.check("ip", now=t) for t in (10, 20)][-1]
+        self.assertEqual((third.remaining, third.reset), (0, 40))
+        self.assertEqual(dict(third.headers()), {"RateLimit-Limit": "3",
+                                                 "RateLimit-Remaining": "0",
+                                                 "RateLimit-Reset": "40"})
+
+    def test_rejection_reports_ban(self):
+        shield = Shield(max_requests=1, ban_seconds=300, rate_limit_headers=True)
+        shield.check("ip", now=0)
+        headers = dict(shield.check("ip", now=0).headers())
+        self.assertEqual(headers["Retry-After"], "300")
+        self.assertEqual(headers["RateLimit-Remaining"], "0")
+        self.assertEqual(headers["RateLimit-Reset"], "300")
+
+    def test_path_rule_is_reported(self):
+        shield = Shield(max_requests=100, rate_limit_headers=True,
+                        path_limits={"/login": (5, 60)})
+        self.assertEqual(shield.check("ip", now=0, path="/login").limit, 5)
+        self.assertEqual(shield.check("ip", now=0, path="/").limit, 100)
+
+
 class DryRunTests(unittest.TestCase):
     def test_everything_passes_but_is_recorded(self):
         shield = Shield(max_requests=2, ban_seconds=30, dry_run=True,
