@@ -39,6 +39,10 @@ sudden traffic spikes, and (optionally) auto-blocking offenders at the firewall.
 - **Ban events** — an `on_ban` hook for your logs, SIEM or chat.
 - **Dry-run mode** — log and count who *would* be blocked without blocking
   anyone, so you can tune limits on real traffic before enforcing them.
+- **Quota headers** — optional `RateLimit-Limit/Remaining/Reset` headers so
+  well-behaved API clients can slow down before they hit the limit.
+- **Proxy-safe** — behind a load balancer, only the `X-Forwarded-For` entries
+  your proxies wrote are trusted, so forged headers can't dodge limits.
 - **Survives restarts** — save and restore bans so a redeploy doesn't hand
   every attacker a clean slate.
 - **Fast and thread-safe** — ~5 µs per request on IPv4, stress-tested with
@@ -139,6 +143,25 @@ shield = Shield(
   offense history is forgotten after that.
 - Paths are normalized before matching, so `//login`, `/./login` or
   `/x/../login` can't sneak past a `/login` rule.
+
+### Telling clients their quota
+
+```python
+app.add_middleware(ShieldASGIMiddleware, max_requests=100, rate_limit_headers=True)
+```
+
+Every response then carries the client's budget, and rejections add
+`Retry-After`:
+
+```
+HTTP/1.1 200 OK                       HTTP/1.1 429 Too Many Requests
+RateLimit-Limit: 100                  Retry-After: 300
+RateLimit-Remaining: 37               RateLimit-Limit: 100
+RateLimit-Reset: 42                   RateLimit-Remaining: 0
+                                      RateLimit-Reset: 300
+```
+
+When a `path_limits` rule applies, its (stricter) budget is reported.
 
 ### Rolling out safely
 
@@ -334,8 +357,10 @@ allowlist of 3 networks                          150,000/s     6.68 us
 python -m unittest -v
 ```
 
-Includes end-to-end tests that run a real HTTP server on `127.0.0.1`, and
-multi-threaded stress tests that force rapid thread switching to expose races. The
+Includes end-to-end tests that run a real HTTP server on `127.0.0.1`,
+multi-threaded stress tests that force rapid thread switching to expose races,
+and iptables tests that pin the exact firewall commands (mocked, so no root
+needed). CI runs on Python 3.9-3.13 and fails below 95% coverage. The
 Flask and YAML tests are skipped unless those packages are installed
 (`pip install -r requirements.txt`).
 
