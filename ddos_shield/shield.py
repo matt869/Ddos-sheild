@@ -98,6 +98,7 @@ class Shield:
         ipv6_prefix: int = 64,
         path_limits: Optional[Mapping[str, PathLimit]] = None,
         on_ban: Optional[Callable[[str, float], None]] = None,
+        dry_run: bool = False,
     ) -> None:
         """``allowlist`` takes IPs or CIDR ranges (e.g. ``"10.0.0.0/8"``) that are
         never limited — health checks, internal networks, your load balancer.
@@ -125,7 +126,13 @@ class Shield:
 
         ``on_ban(client, seconds)`` is called whenever a client is banned —
         ship it to your logs, SIEM or chat.
+
+        ``dry_run=True`` lets every request through but still logs, counts and
+        records who *would* have been rejected — roll out on real traffic,
+        tune the limits from ``stats()``, then switch enforcement on.
         """
+        if dry_run and use_iptables:
+            raise ValueError("dry_run can't be combined with use_iptables")
         if not 0 < ipv6_prefix <= 128:
             raise ValueError("ipv6_prefix must be between 1 and 128")
         if cleanup_interval <= 0:
@@ -153,6 +160,7 @@ class Shield:
             for path, rule in (path_limits or {}).items()
         }
         self.on_ban = on_ban
+        self.dry_run = dry_run
         self.cleanup_interval = float(cleanup_interval)
         self._next_cleanup: float | None = None
         self.on_attack = on_attack
@@ -165,6 +173,7 @@ class Shield:
             "rate_limited": 0,
             "path_limited": 0,
             "blocked": 0,
+            "dry_run_passed": 0,
         }
 
     def is_allowlisted(self, ip: str) -> bool:
@@ -208,7 +217,15 @@ class Shield:
         self, ip: str, now: float | None = None, *, path: Optional[str] = None
     ) -> Decision:
         """Record a request from ``ip`` (to ``path``) and decide whether to serve it."""
-        now = time.monotonic() if now is None else now
+        decision = self._decide(ip, time.monotonic() if now is None else now, path)
+        if decision.allowed or not self.dry_run:
+            return decision
+        self._count("dry_run_passed")
+        logger.info("dry run: would reject %s on %s with %d (%s)",
+                    ip, path or "-", decision.status, decision.reason)
+        return ALLOW
+
+    def _decide(self, ip: str, now: float, path: Optional[str]) -> Decision:
         self.monitor.record(now)
         self._maybe_cleanup(now)
         self._maybe_alert(now)
@@ -282,6 +299,7 @@ class Shield:
             "under_attack": rate >= self.monitor.spike_threshold,
             "active_bans": len(self.blocklist.banned(now)),
             "tracked_clients": self.limiter.tracked_clients(),
+            "dry_run": self.dry_run,
         }
 
     def _notify_ban(self, key: str, duration: float) -> None:

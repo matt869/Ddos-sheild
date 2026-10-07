@@ -44,6 +44,8 @@ def prometheus_text(shield: Shield, prefix: str = "ddos_shield") -> str:
         ("active_bans", "Clients currently banned.", stats["active_bans"]),
         ("tracked_clients", "Clients held in rate limiter memory.",
          stats["tracked_clients"]),
+        ("dry_run", "1 while running in dry-run mode (nothing is rejected).",
+         int(stats["dry_run"])),
     ]
     for gauge, help_text, value in gauges:
         lines.append(f"{metric(gauge, 'gauge', help_text)} {value:g}")

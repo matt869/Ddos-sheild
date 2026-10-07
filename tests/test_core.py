@@ -46,7 +46,7 @@ class ShieldTests(unittest.TestCase):
         stats = shield.stats(now=0)
         self.assertEqual(stats["requests"], {"allowed": 3, "allowlisted": 1,
                                              "rate_limited": 1, "path_limited": 0,
-                                             "blocked": 1})
+                                             "blocked": 1, "dry_run_passed": 0})
         self.assertEqual(stats["current_rate"], 6.0)
         self.assertFalse(stats["under_attack"])
         self.assertEqual(stats["active_bans"], 1)
@@ -163,6 +163,29 @@ class PathLimitTests(unittest.TestCase):
         for t in range(4):
             shield.check("ip", now=t, path="/login")
         self.assertEqual(shield.stats(now=4)["requests"]["path_limited"], 1)
+
+
+class DryRunTests(unittest.TestCase):
+    def test_everything_passes_but_is_recorded(self):
+        shield = Shield(max_requests=2, ban_seconds=30, dry_run=True,
+                        path_limits={"/login": (1, 60)})
+        with self.assertLogs("ddos_shield", level="INFO") as logs:
+            results = [shield.check("ip", now=0).allowed for _ in range(5)]
+            shield.check("other", now=0, path="/login")
+            shield.check("other", now=0, path="/login")
+        self.assertEqual(results, [True] * 5)
+        counts = shield.stats(now=0)["requests"]
+        self.assertEqual(counts["rate_limited"], 1)       # would have been a 429
+        self.assertEqual(counts["blocked"], 2)            # would have been 403s
+        self.assertEqual(counts["path_limited"], 1)
+        self.assertEqual(counts["dry_run_passed"], 4)
+        self.assertIn("ip", shield.blocklist.banned(now=0))
+        self.assertTrue(any("would reject ip on - with 429" in m for m in logs.output))
+        self.assertTrue(shield.stats(now=0)["dry_run"])
+
+    def test_cannot_combine_with_iptables(self):
+        with self.assertRaises(ValueError):
+            Shield(dry_run=True, use_iptables=True)
 
 
 class OnBanTests(unittest.TestCase):
